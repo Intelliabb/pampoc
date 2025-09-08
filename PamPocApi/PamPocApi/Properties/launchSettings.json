@@ -1,0 +1,30 @@
+﻿{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5269",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "TTS_VOICE_PATH": "/Users/intelliabb/Library/models/piper/en_US-lessac-high.onnx",
+        "STT_URL": "http://127.0.0.1:8001/v1/audio/transcriptions",
+        "LLM_URL": "http://localhost:11434/v1/chat/completions",
+        "DEFAULT_LLM_MODEL": "mistral:instruct",
+        "TTS_MODE": "cli",
+        "PIPER_BIN": "/Users/intelliabb/Library/tools/venvs/piper/bin/piper",
+        "TTS_URL": "http://127.0.0.1:5000/tts"
+      }
+    },
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "https://localhost:7170;http://localhost:5269",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

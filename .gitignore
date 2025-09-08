@@ -22,6 +22,7 @@ x86/
 .vs/
 .idea/
 *.iml
+*.claude
 
 # ---- NuGet ----
 *.nupkg
@@ -38,9 +39,14 @@ packages/
 .AppleDouble
 .LSOverride
 
+# ---- Repo level
+PamPocApi/gateway.env
+
 # ---- API (ASP.NET Core / Minimal API) ----
-PamPocApi/appsettings.*.json  # keep base appsettings.json if needed
-PamPocApi/wwwroot/lib/        # typical static assets (if restored via npm/bower)
+PamPocApi/PamPocApi/appsettings.*.json  # keep base appsettings.json if needed
+PamPocApi/PamPocApi/wwwroot/lib/        # typical static assets (if restored via npm/bower)
+PamPocApi/PamPocApi/bin/
+PamPocApi/PamPocApi/obj/
 
 # ---- Client (MAUI) ----
 PamPocClient/bin/

@@ -9,10 +9,12 @@ namespace PamPocApi.Controllers;
 public class ChatController : ControllerBase
 {
     private readonly IChatService _chatService;
+    private readonly IPromptService _promptService;
 
-    public ChatController(IChatService chatService)
+    public ChatController(IChatService chatService, IPromptService promptService)
     {
         _chatService = chatService;
+        _promptService = promptService;
     }
 
     [HttpPost]
@@ -22,6 +24,10 @@ public class ChatController : ControllerBase
             return BadRequest(new { error = "BAD_INPUT", message = "messages required" });
 
         var systemPrompt = request.Messages.FirstOrDefault(m => m.Role == "system")?.Content;
+        
+        if (string.IsNullOrWhiteSpace(systemPrompt))
+            systemPrompt = _promptService.GetSystemPrompt();
+        
         var userMessage = request.Messages.LastOrDefault(m => m.Role == "user")?.Content ?? string.Empty;
 
         var (success, response, usage, error) = await _chatService.SendChatAsync(

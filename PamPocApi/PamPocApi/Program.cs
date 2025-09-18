@@ -31,7 +31,7 @@ builder.Services.AddCors(options =>
         }
         else
         {
-            policy.WithOrigins(builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? Array.Empty<string>())
+            policy.WithOrigins(builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? [])
                   .AllowAnyHeader()
                   .AllowAnyMethod()
                   .AllowCredentials();
@@ -43,6 +43,7 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<ISpeechService, SpeechService>();
 builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<IPromptService, PromptService>();
 
 var app = builder.Build();
 

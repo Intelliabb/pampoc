@@ -14,11 +14,13 @@ public class VoiceController : ControllerBase
     private readonly ISpeechService _speechService;
     private readonly IChatService _chatService;
     private readonly ServiceConfiguration _config;
+    private readonly IPromptService _promptService;
 
-    public VoiceController(ISpeechService speechService, IChatService chatService, IOptions<ServiceConfiguration> config)
+    public VoiceController(ISpeechService speechService, IChatService chatService, IOptions<ServiceConfiguration> config, IPromptService promptService)
     {
         _speechService = speechService;
         _chatService = chatService;
+        _promptService = promptService;
         _config = config.Value;
     }
 
@@ -45,7 +47,7 @@ public class VoiceController : ControllerBase
 
         var llmStopwatch = Stopwatch.StartNew();
         var (llmSuccess, answer, usage, llmError) = await _chatService.SendChatAsync(
-            transcript, llm_model, system_prompt, temperature, max_tokens, cancellationToken);
+            transcript, llm_model, system_prompt ?? _promptService.GetSystemPrompt(), temperature, max_tokens, cancellationToken);
         llmStopwatch.Stop();
         
         if (!llmSuccess)

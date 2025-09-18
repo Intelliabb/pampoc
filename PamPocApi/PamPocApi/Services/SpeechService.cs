@@ -40,7 +40,7 @@ public class SpeechService : ISpeechService
         if (!response.IsSuccessStatusCode)
             return (false, string.Empty, $"STT upstream status {(int)response.StatusCode} {response.ReasonPhrase}");
 
-        using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var sttResult = await JsonSerializer.DeserializeAsync<SttResult>(responseStream, _jsonOptions, cancellationToken);
         
         if (sttResult is null || string.IsNullOrWhiteSpace(sttResult.Text)) 

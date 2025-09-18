@@ -35,7 +35,7 @@ public class VoiceService : IVoiceService
             var json = JsonSerializer.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/chat", content);
+            var response = await _httpClient.PostAsync("/api/chat", content);
             response.EnsureSuccessStatusCode();
 
             var responseJson = await response.Content.ReadAsStringAsync();
@@ -57,7 +57,7 @@ public class VoiceService : IVoiceService
             var json = JsonSerializer.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/voice", content);
+            var response = await _httpClient.PostAsync("/api/voice", content);
             response.EnsureSuccessStatusCode();
 
             return await response.Content.ReadAsByteArrayAsync();
@@ -77,7 +77,7 @@ public class VoiceService : IVoiceService
             audioContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
             formContent.Add(audioContent, "audio", "audio.wav");
 
-            var response = await _httpClient.PostAsync("/stt", formContent);
+            var response = await _httpClient.PostAsync("/api/stt", formContent);
             response.EnsureSuccessStatusCode();
 
             var responseJson = await response.Content.ReadAsStringAsync();
@@ -99,7 +99,7 @@ public class VoiceService : IVoiceService
             var json = JsonSerializer.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("/tts", content);
+            var response = await _httpClient.PostAsync("/api/tts", content);
             response.EnsureSuccessStatusCode();
 
             return await response.Content.ReadAsByteArrayAsync();
@@ -119,7 +119,7 @@ public class VoiceService : IVoiceService
             audioContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
             formContent.Add(audioContent, "file", "recording.wav");
 
-            var response = await _httpClient.PostAsync("/voice", formContent);
+            var response = await _httpClient.PostAsync("/api/voice", formContent);
             response.EnsureSuccessStatusCode();
 
             var responseJson = await response.Content.ReadAsStringAsync();
@@ -152,7 +152,7 @@ public class VoiceService : IVoiceService
             audioContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
             formContent.Add(audioContent, "file", "recording.wav");
 
-            var response = await _httpClient.PostAsync("/voice.json", formContent);
+            var response = await _httpClient.PostAsync("/api/voice/json", formContent);
             response.EnsureSuccessStatusCode();
 
             var responseJson = await response.Content.ReadAsStringAsync();
@@ -187,7 +187,7 @@ public class VoiceService : IVoiceService
     {
         try
         {
-            var response = await _httpClient.GetAsync("/health");
+            var response = await _httpClient.GetAsync("/api/health");
             response.EnsureSuccessStatusCode();
 
             var responseJson = await response.Content.ReadAsStringAsync();

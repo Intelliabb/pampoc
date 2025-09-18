@@ -6,18 +6,14 @@ using PamPocApi.Models;
 
 namespace PamPocApi.Services;
 
-public class ChatService : IChatService
+public class ChatService(
+    HttpClient httpClient,
+    IOptions<ServiceConfiguration> config,
+    IOptionsMonitor<JsonSerializerOptions> jsonOptions)
+    : IChatService
 {
-    private readonly HttpClient _httpClient;
-    private readonly ServiceConfiguration _config;
-    private readonly JsonSerializerOptions _jsonOptions;
-
-    public ChatService(HttpClient httpClient, IOptions<ServiceConfiguration> config, IOptionsMonitor<JsonSerializerOptions> jsonOptions)
-    {
-        _httpClient = httpClient;
-        _config = config.Value;
-        _jsonOptions = jsonOptions.Get("Web");
-    }
+    private readonly ServiceConfiguration _config = config.Value;
+    private readonly JsonSerializerOptions _jsonOptions = jsonOptions.Get("Web");
 
     public async Task<(bool Success, string Response, object? Usage, string? Error)> SendChatAsync(
         string prompt,
@@ -44,16 +40,14 @@ public class ChatService : IChatService
         };
 
         var jsonContent = JsonSerializer.Serialize(requestObject, _jsonOptions);
-        using var request = new HttpRequestMessage(HttpMethod.Post, _config.LlmUrl)
-        {
-            Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
-        };
-        
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, _config.LlmUrl);
+        request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
             return (false, string.Empty, null, $"LLM upstream status {(int)response.StatusCode} {response.ReasonPhrase}");
 
-        using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
 
         var root = document.RootElement;

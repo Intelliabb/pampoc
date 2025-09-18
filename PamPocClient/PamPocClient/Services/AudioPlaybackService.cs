@@ -20,7 +20,7 @@ public class AudioPlaybackService(ILogger<AudioPlaybackService> logger) : IAudio
 #if MACCATALYST
             await PlayAudioMacCatalyst(audioPath);
 #else
-            _logger.LogWarning("Audio playback not implemented for this platform");
+            logger.LogWarning("Audio playback not implemented for this platform");
 #endif
             
             // Clean up temp file

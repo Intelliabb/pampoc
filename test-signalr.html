@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Conversation Interrupt Test</title>
+    <script src="https://unpkg.com/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
+</head>
+<body>
+    <h1>Conversation Interrupt Test</h1>
+    <div id="status">Disconnected</div>
+    <br>
+    
+    <button onclick="startConversation()">Start Conversation</button>
+    <button onclick="sendMessage()">Send Long Message</button>
+    <button onclick="interrupt()">Interrupt</button>
+    <button onclick="endConversation()">End Conversation</button>
+    
+    <div id="log" style="background: #f0f0f0; padding: 10px; margin-top: 20px; height: 300px; overflow-y: auto;"></div>
+
+    <script>
+        let connection;
+        let conversationId;
+
+        async function initSignalR() {
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl("http://localhost:5269/conversation-hub")
+                .build();
+
+            connection.on("JoinedConversation", (id) => {
+                log(`Joined conversation: ${id}`);
+            });
+
+            connection.on("StateChanged", (data) => {
+                log(`State changed: ${data.state}`, data);
+            });
+
+            connection.on("ConversationInterrupted", (data) => {
+                log(`Conversation interrupted!`, data);
+            });
+
+            await connection.start();
+            document.getElementById('status').textContent = 'Connected';
+            log('SignalR connected');
+        }
+
+        async function startConversation() {
+            const response = await fetch('http://localhost:5269/api/conversation/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ systemPrompt: 'You are a helpful assistant.' })
+            });
+            
+            const data = await response.json();
+            conversationId = data.conversationId;
+            log(`Started conversation: ${conversationId}`);
+            
+            await connection.invoke("JoinConversation", conversationId);
+        }
+
+        async function sendMessage() {
+            if (!conversationId) {
+                alert('Start a conversation first');
+                return;
+            }
+
+            log('Sending long message...');
+            
+            const response = await fetch(`http://localhost:5269/api/conversation/${conversationId}/continue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    text: 'Tell me a very detailed 500-word story about the history of computers. Include lots of technical details and make it comprehensive.' 
+                })
+            });
+            
+            log('Message sent, processing...');
+        }
+
+        async function interrupt() {
+            if (!conversationId) {
+                alert('Start a conversation first');
+                return;
+            }
+
+            log('Interrupting conversation...');
+            
+            const response = await fetch(`http://localhost:5269/api/conversation/${conversationId}/interrupt`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    additionalPrompt: 'Actually, make it about space exploration instead and keep it short' 
+                })
+            });
+            
+            const data = await response.json();
+            log('Interrupted!', data);
+        }
+
+        async function endConversation() {
+            if (!conversationId) return;
+            
+            await fetch(`http://localhost:5269/api/conversation/${conversationId}`, {
+                method: 'DELETE'
+            });
+            
+            log('Conversation ended');
+            conversationId = null;
+        }
+
+        function log(message, data = null) {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const entry = `[${time}] ${message}`;
+            
+            logDiv.innerHTML += entry + (data ? `<br><pre>${JSON.stringify(data, null, 2)}</pre>` : '') + '<br>';
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        // Initialize on page load
+        initSignalR();
+    </script>
+</body>
+</html>

@@ -18,6 +18,7 @@ builder.Services.Configure<JsonSerializerOptions>("Web", options =>
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
 builder.Services.AddHealthChecks();
+builder.Services.AddSignalR();
 
 builder.Services.AddCors(options =>
 {
@@ -25,9 +26,10 @@ builder.Services.AddCors(options =>
     {
         if (builder.Environment.IsDevelopment())
         {
-            policy.AllowAnyOrigin()
+            policy.SetIsOriginAllowed(origin => true)
                   .AllowAnyHeader()
-                  .AllowAnyMethod();
+                  .AllowAnyMethod()
+                  .AllowCredentials();
         }
         else
         {
@@ -59,5 +61,6 @@ app.UseCors("DefaultPolicy");
 
 app.MapControllers();
 app.MapHealthChecks("/health");
+app.MapHub<ConversationHub>("/conversation-hub");
 
 app.Run();

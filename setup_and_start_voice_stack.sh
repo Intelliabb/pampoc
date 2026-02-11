@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ───────────────────────────── Config (change if you like) ─────────────────────────────
 # LLM model to pull for Ollama
-OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:instruct}"   # or llama3.1:8b-instruct
+OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:instruct}"
 
 # STT server bind
 STT_HOST="127.0.0.1"
@@ -13,7 +12,7 @@ STT_PORT="8001"
 PROJ_ROOT="$HOME/Projects/VoiceAgent"
 API_DIR="$PROJ_ROOT/PamPocApi"
 
-# Tools & models (per your layout)
+# Tools & models
 TOOLS_DIR="$HOME/Library/tools"
 LOG_DIR="$HOME/Library/Logs/voice-stack"
 RUN_DIR="$HOME/.run/voice-stack"

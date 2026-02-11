@@ -14,12 +14,12 @@ public interface IVoiceService
 public class VoiceService : IVoiceService
 {
     private readonly HttpClient _httpClient;
-    private readonly string _baseUrl = "http://localhost:5269";
+    private const string BaseUrl = "http://localhost:5269";
 
     public VoiceService(HttpClient httpClient)
     {
         _httpClient = httpClient;
-        _httpClient.BaseAddress = new Uri(_baseUrl);
+        _httpClient.BaseAddress = new Uri(BaseUrl);
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
@@ -61,7 +61,6 @@ public class VoiceService : IVoiceService
 
             var responseJson = await response.Content.ReadAsStringAsync();
             
-            // Try to parse as JSON response first, fallback to plain text
             try
             {
                 var jsonResponse = JsonSerializer.Deserialize<VoiceResponse>(responseJson);
@@ -83,7 +82,7 @@ public class VoiceService : IVoiceService
         await using var stream = await FileSystem.OpenAppPackageFileAsync("sample.wav");
         using var memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
-        byte[] audioData = memoryStream.ToArray();
+        var audioData = memoryStream.ToArray();
         return audioData;
     }
 
@@ -97,7 +96,7 @@ public class VoiceService : IVoiceService
             var responseJson = await response.Content.ReadAsStringAsync();
             var healthResponse = JsonSerializer.Deserialize<HealthResponse>(responseJson);
 
-            return healthResponse?.Status?.Equals("healthy", StringComparison.OrdinalIgnoreCase) == true;
+            return healthResponse?.Status.Equals("healthy", StringComparison.OrdinalIgnoreCase) == true;
         }
         catch (Exception)
         {

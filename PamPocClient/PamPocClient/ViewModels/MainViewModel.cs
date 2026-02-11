@@ -11,20 +11,21 @@ public partial class MainViewModel : ObservableObject
     private readonly IVoiceService _voiceService;
     private readonly IAudioRecordingService _audioRecordingService;
     private readonly IAudioPlaybackService _audioPlaybackService;
+    private const int ContextWindowMessageCount = 10;
 
     [ObservableProperty]
-    private string messageText = string.Empty;
+    private string _messageText = string.Empty;
 
     [ObservableProperty]
-    private bool isBusy = false;
+    private bool _isBusy = false;
 
     [ObservableProperty]
-    private bool isRecording = false;
+    private bool _isRecording = false;
 
     [ObservableProperty]
-    private string statusMessage = "Ready";
+    private string _statusMessage = "Ready";
 
-    public ObservableCollection<ChatMessage> Messages { get; } = new();
+    public ObservableCollection<ChatMessage> Messages { get; } = [];
 
     public MainViewModel(IVoiceService voiceService, IAudioRecordingService audioRecordingService, IAudioPlaybackService audioPlaybackService)
     {
@@ -58,7 +59,7 @@ public partial class MainViewModel : ObservableObject
             Messages.Add(userChatMessage);
 
             // Get response from API
-            var allMessages = Messages.ToList();
+            var allMessages = Messages.Take(ContextWindowMessageCount).ToList();
             var response = await _voiceService.GetChatCompletionAsync(allMessages);
 
             // Add assistant response to collection
@@ -117,11 +118,7 @@ public partial class MainViewModel : ObservableObject
 
     private async Task StartRecordingWithPermissionCheckAsync()
     {
-        System.Diagnostics.Debug.WriteLine("MainViewModel: StartRecordingWithPermissionCheckAsync called");
-        
-        // Check current permission status
         var permissionStatus = await _audioRecordingService.CheckPermissionStatusAsync();
-        System.Diagnostics.Debug.WriteLine($"MainViewModel: Permission status: {permissionStatus}");
         
         switch (permissionStatus)
         {
@@ -148,9 +145,9 @@ public partial class MainViewModel : ObservableObject
                 
             case PermissionStatus.Unknown:
             case PermissionStatus.Disabled:
+            case PermissionStatus.Restricted:
+            case PermissionStatus.Limited:
             default:
-                // Request permission for the first time or if status is unknown
-                System.Diagnostics.Debug.WriteLine("MainViewModel: Permission unknown/disabled, requesting permission");
                 await RequestAndStartRecordingAsync();
                 break;
         }
@@ -211,13 +208,9 @@ public partial class MainViewModel : ObservableObject
     {
         try
         {
-            System.Diagnostics.Debug.WriteLine("MainViewModel: StartRecordingAsync called");
             IsRecording = true;
             StatusMessage = "Recording... Will auto-stop after 3s of silence";
             
-            System.Diagnostics.Debug.WriteLine("MainViewModel: Starting recording service...");
-            
-            // Start recording (will continue until manually stopped)
             var recordingTask = _audioRecordingService.StartRecordingWithSilenceDetectionAsync(3);
             
             // Don't await here - let it run in background until user stops it
@@ -232,7 +225,7 @@ public partial class MainViewModel : ObservableObject
             // Play back what we recorded for verification
             try
             {
-                await _audioPlaybackService.PlayAudioAsync(audioData);
+                //await _audioPlaybackService.PlayAudioAsync(audioData);
                 StatusMessage = "Playback complete. Sending to API...";
 
                 // Process the recorded audio through the voice service
@@ -287,6 +280,11 @@ public partial class MainViewModel : ObservableObject
                 // var response = await _voiceService.ProcessVoiceAsync(audioData);
                 var response = await _voiceService.ProcessVoiceWithTextAsync(audioData);
                 
+                Messages.Add(new ChatMessage {
+                    Role = "user",
+                    Content = response.Transcript,
+                    Timestamp = DateTime.Now
+                });
                 System.Diagnostics.Debug.WriteLine($"MainViewModel: API response: Transcript:'{response.Transcript}' Response:'{response.AssistantText}'");
                 
                 if (!string.IsNullOrWhiteSpace(response.Transcript))
@@ -299,37 +297,30 @@ public partial class MainViewModel : ObservableObject
                     });
                     System.Diagnostics.Debug.WriteLine($"MainViewModel: Assistant response: '{response.AssistantText}'");
                     
-                    // Play audio if available
-                    if (response.Audio != null && response.Audio.Length > 0)
+                    if (response.Audio.Length > 0)
                     {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"MainViewModel: Playing audio response of {response.Audio.Length} bytes");
                         await PlayAudioAsync(response.Audio);
                     }
                 }
                 else
                 {
                     StatusMessage = "No transcription received from API";
-                    System.Diagnostics.Debug.WriteLine("MainViewModel: API returned empty response");
                 }
             }
             else
             {
                 StatusMessage = "No audio recorded";
-                System.Diagnostics.Debug.WriteLine("MainViewModel: No audio data to process");
             }
 
             StatusMessage = "Ready";
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"MainViewModel: Speech processing error - {ex.Message}");
             StatusMessage = $"Speech processing error: {ex.Message}";
         }
         finally
         {
             IsBusy = false;
-            System.Diagnostics.Debug.WriteLine("MainViewModel: Done processing audio");
         }
     }
 
@@ -357,7 +348,6 @@ public partial class MainViewModel : ObservableObject
             {
                 StatusMessage = "Connected - Ready to chat";
                 
-                // Add welcome message
                 var welcomeMessage = new ChatMessage
                 {
                     Role = "assistant",

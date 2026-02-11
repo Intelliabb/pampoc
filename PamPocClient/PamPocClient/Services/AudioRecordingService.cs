@@ -2,7 +2,7 @@ using AVFoundation;
 using Foundation;
 using AudioToolbox;
 
-namespace PamPocClient.Services;
+namespace PamPocClient.Services;      
 
 public interface IAudioRecordingService
 {
@@ -11,7 +11,7 @@ public interface IAudioRecordingService
     Task<byte[]> StartRecordingWithSilenceDetectionAsync(int silenceTimeoutSeconds = 3);
     Task StopRecordingAsync();
     bool IsRecording { get; }
-}
+} 
 
 public class AudioRecordingService : IAudioRecordingService, IDisposable
 {
@@ -80,22 +80,20 @@ public class AudioRecordingService : IAudioRecordingService, IDisposable
         var permissionStatus = await CheckPermissionStatusAsync();
         System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Permission status: {permissionStatus}");
 
-        if (permissionStatus != PermissionStatus.Granted)
+        if (permissionStatus == PermissionStatus.Granted) 
+            return await RecordAudioAsync(silenceTimeoutSeconds);
+        
+        if (permissionStatus == PermissionStatus.Denied || permissionStatus == PermissionStatus.Restricted)
         {
-            if (permissionStatus == PermissionStatus.Denied || permissionStatus == PermissionStatus.Restricted)
-            {
-                throw new UnauthorizedAccessException("Microphone access denied. Please enable it in System Settings > Privacy & Security > Microphone");
-            }
-
-            // Try to request permission
-            var granted = await RequestPermissionsAsync();
-            if (!granted)
-            {
-                throw new UnauthorizedAccessException("Microphone access denied");
-            }
+            throw new UnauthorizedAccessException("Microphone access denied. Please enable it in System Settings > Privacy & Security > Microphone");
         }
 
-        System.Diagnostics.Debug.WriteLine("AudioRecordingService: Starting recording...");
+        // Try to request permission
+        var granted = await RequestPermissionsAsync();
+        if (!granted)
+        {
+            throw new UnauthorizedAccessException("Microphone access denied");
+        }
 
         return await RecordAudioAsync(silenceTimeoutSeconds);
     }
@@ -219,14 +217,12 @@ public class AudioRecordingService : IAudioRecordingService, IDisposable
 
                 var now = DateTime.Now;
                 var recordingDuration = now - recordingStart;
-                bool audioDetected = false;
 
                 if (_recorder != null && _recorder.Recording)
                 {
                     // Grace period - assume activity for first 3 seconds
-                    if (recordingDuration.TotalSeconds < 3.0)
+                    if (recordingDuration.TotalSeconds < silenceThresholdSeconds)
                     {
-                        audioDetected = true;
                         lastAudioActivity = now;
                     }
                     else if (_recorder.MeteringEnabled)
@@ -236,7 +232,6 @@ public class AudioRecordingService : IAudioRecordingService, IDisposable
 
                         if (peakPower > silenceThresholdDb)
                         {
-                            audioDetected = true;
                             lastAudioActivity = now;
                             System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Audio detected - peak: {peakPower:F1}dB");
                         }
@@ -246,7 +241,7 @@ public class AudioRecordingService : IAudioRecordingService, IDisposable
                 var silenceDuration = now - lastAudioActivity;
 
                 // Check if silence threshold reached
-                if (silenceDuration.TotalSeconds >= silenceThresholdSeconds && recordingDuration.TotalSeconds > 3)
+                if (silenceDuration.TotalSeconds >= silenceThresholdSeconds && recordingDuration.TotalSeconds > silenceThresholdSeconds)
                 {
                     System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Silence threshold reached ({silenceThresholdSeconds}s)");
                     break;

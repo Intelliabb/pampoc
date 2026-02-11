@@ -1,6 +1,8 @@
+using System.Text.Json.Serialization;
+
 namespace PamPocApi.Models;
 
-public record SttResult(string Text);
+public record SttResult([property: JsonPropertyName("text")] string Text);
 
 public record TtsRequest(string Text, string? Voice);
 

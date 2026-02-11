@@ -44,6 +44,9 @@ public class VoiceController : ControllerBase
         
         if (!sttSuccess)
             return Problem(detail: sttError, statusCode: 502);
+        
+        System.Diagnostics.Debug.WriteLine($"[{ToString()}]: Voice: Transcript:'{transcript}'");
+
 
         var llmStopwatch = Stopwatch.StartNew();
         var (llmSuccess, answer, usage, llmError) = await _chatService.SendChatAsync(
@@ -84,6 +87,7 @@ public class VoiceController : ControllerBase
         if (!sttSuccess)
             return Problem(detail: sttError, statusCode: 502);
 
+        System.Diagnostics.Debug.WriteLine($"[{ToString()}]: Voice: Transcript:'{transcript}'");
         var llmStopwatch = Stopwatch.StartNew();
         var (llmSuccess, answer, usage, llmError) = await _chatService.SendChatAsync(
             transcript, llm_model, system_prompt, cancellationToken: cancellationToken);

@@ -225,12 +225,24 @@ public partial class MainViewModel : ObservableObject
             var audioData = await recordingTask;
             
             System.Diagnostics.Debug.WriteLine($"MainViewModel: Recording complete, received {audioData.Length} bytes");
-            
+
+            IsRecording = false;
+            StatusMessage = "Playing back recording...";
+
             // Play back what we recorded for verification
-            //await _audioPlaybackService.PlayAudioAsync(audioData);
-            
-            // Process the recorded audio through the voice service
-            await ProcessRecordedAudioAsync(audioData);
+            try
+            {
+                await _audioPlaybackService.PlayAudioAsync(audioData);
+                StatusMessage = "Playback complete. Sending to API...";
+
+                // Process the recorded audio through the voice service
+                await ProcessRecordedAudioAsync(audioData);
+            }
+            catch (Exception playbackEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"MainViewModel: Playback failed - {playbackEx.Message}");
+                StatusMessage = $"Playback failed: {playbackEx.Message}";
+            }
         }
         catch (Exception ex)
         {
@@ -275,7 +287,7 @@ public partial class MainViewModel : ObservableObject
                 // var response = await _voiceService.ProcessVoiceAsync(audioData);
                 var response = await _voiceService.ProcessVoiceWithTextAsync(audioData);
                 
-                System.Diagnostics.Debug.WriteLine($"MainViewModel: API response: '{response}'");
+                System.Diagnostics.Debug.WriteLine($"MainViewModel: API response: Transcript:'{response.Transcript}' Response:'{response.AssistantText}'");
                 
                 if (!string.IsNullOrWhiteSpace(response.Transcript))
                 {

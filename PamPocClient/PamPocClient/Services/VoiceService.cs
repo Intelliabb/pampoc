@@ -7,10 +7,6 @@ namespace PamPocClient.Services;
 public interface IVoiceService
 {
     Task<string> GetChatCompletionAsync(List<ChatMessage> messages);
-    Task<byte[]> GetVoiceAsync(string text, string voice = "alloy");
-    Task<string> GetSpeechToTextAsync(byte[] audioData);
-    Task<byte[]> GetTextToSpeechAsync(string text, string voice = "alloy");
-    Task<string> ProcessVoiceAsync(byte[] audioData);
     Task<VoiceResponse> ProcessVoiceWithTextAsync(byte[] audioData);
     Task<bool> CheckHealthAsync();
 }
@@ -49,98 +45,6 @@ public class VoiceService : IVoiceService
         }
     }
 
-    public async Task<byte[]> GetVoiceAsync(string text, string voice = "alloy")
-    {
-        try
-        {
-            var request = new VoiceRequest { Text = text, Voice = voice };
-            var json = JsonSerializer.Serialize(request);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            var response = await _httpClient.PostAsync("/api/voice", content);
-            response.EnsureSuccessStatusCode();
-
-            return await response.Content.ReadAsByteArrayAsync();
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"Failed to get voice audio: {ex.Message}");
-        }
-    }
-
-    public async Task<string> GetSpeechToTextAsync(byte[] audioData)
-    {
-        try
-        {
-            using var formContent = new MultipartFormDataContent();
-            using var audioContent = new ByteArrayContent(audioData);
-            audioContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
-            formContent.Add(audioContent, "audio", "audio.wav");
-
-            var response = await _httpClient.PostAsync("/api/stt", formContent);
-            response.EnsureSuccessStatusCode();
-
-            var responseJson = await response.Content.ReadAsStringAsync();
-            var sttResponse = JsonSerializer.Deserialize<SpeechToTextResponse>(responseJson);
-
-            return sttResponse?.Text ?? string.Empty;
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"Failed to convert speech to text: {ex.Message}");
-        }
-    }
-
-    public async Task<byte[]> GetTextToSpeechAsync(string text, string voice = "alloy")
-    {
-        try
-        {
-            var request = new VoiceRequest { Text = text, Voice = voice };
-            var json = JsonSerializer.Serialize(request);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            var response = await _httpClient.PostAsync("/api/tts", content);
-            response.EnsureSuccessStatusCode();
-
-            return await response.Content.ReadAsByteArrayAsync();
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"Failed to convert text to speech: {ex.Message}");
-        }
-    }
-
-    public async Task<string> ProcessVoiceAsync(byte[] audioData)
-    {
-        try
-        {
-            using var formContent = new MultipartFormDataContent();
-            using var audioContent = new ByteArrayContent(audioData);
-            audioContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
-            formContent.Add(audioContent, "file", "recording.wav");
-
-            var response = await _httpClient.PostAsync("/api/voice", formContent);
-            response.EnsureSuccessStatusCode();
-
-            var responseJson = await response.Content.ReadAsStringAsync();
-            
-            // Try to parse as JSON response first, fallback to plain text
-            try
-            {
-                var jsonResponse = JsonSerializer.Deserialize<SpeechToTextResponse>(responseJson);
-                return jsonResponse?.Text ?? responseJson;
-            }
-            catch
-            {
-                return responseJson;
-            }
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"Failed to process voice: {ex.Message}");
-        }
-    }
-    
     public async Task<VoiceResponse> ProcessVoiceWithTextAsync(byte[] audioData)
     {
         try

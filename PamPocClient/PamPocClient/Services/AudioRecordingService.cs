@@ -1,13 +1,6 @@
-using Plugin.Maui.Audio;
-using System.IO;
-using System.Text;
-using Encoding = System.Text.Encoding;
-
-#if MACCATALYST
 using AVFoundation;
 using Foundation;
 using AudioToolbox;
-#endif
 
 namespace PamPocClient.Services;
 
@@ -22,28 +15,24 @@ public interface IAudioRecordingService
 
 public class AudioRecordingService : IAudioRecordingService, IDisposable
 {
-    private readonly IAudioManager _audioManager;
-    private IAudioRecorder? _recorder;
+    private AVAudioRecorder? _recorder;
     private CancellationTokenSource? _cancellationTokenSource;
-    private readonly List<byte> _audioData = new();
+    private string? _recordingFilePath;
 
-#if MACCATALYST
-    private AVAudioRecorder? _nativeRecorder;
-    private string? _tempAudioFilePath;
-#endif
-    
     public bool IsRecording { get; private set; }
-
-    public AudioRecordingService(IAudioManager audioManager)
-    {
-        _audioManager = audioManager;
-    }
 
     public async Task<PermissionStatus> CheckPermissionStatusAsync()
     {
         try
         {
-            return await Permissions.CheckStatusAsync<Permissions.Microphone>();
+            var authStatus = AVCaptureDevice.GetAuthorizationStatus(AVAuthorizationMediaType.Audio);
+            return authStatus switch
+            {
+                AVAuthorizationStatus.Authorized => PermissionStatus.Granted,
+                AVAuthorizationStatus.Denied => PermissionStatus.Denied,
+                AVAuthorizationStatus.Restricted => PermissionStatus.Restricted,
+                _ => PermissionStatus.Unknown
+            };
         }
         catch (Exception)
         {
@@ -56,21 +45,28 @@ public class AudioRecordingService : IAudioRecordingService, IDisposable
         try
         {
             var currentStatus = await CheckPermissionStatusAsync();
-            
+
             if (currentStatus == PermissionStatus.Granted)
                 return true;
 
-            if (currentStatus == PermissionStatus.Denied && DeviceInfo.Platform == DevicePlatform.iOS)
+            if (currentStatus == PermissionStatus.Denied)
             {
-                // On iOS, once denied, we need to direct user to settings
+                // Already denied, user needs to go to System Settings
                 return false;
             }
 
-            var status = await Permissions.RequestAsync<Permissions.Microphone>();
-            return status == PermissionStatus.Granted;
+            // Request permission
+            var tcs = new TaskCompletionSource<bool>();
+            AVCaptureDevice.RequestAccessForMediaType(AVAuthorizationMediaType.Audio, (granted) =>
+            {
+                tcs.SetResult(granted);
+            });
+
+            return await tcs.Task;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Permission request failed - {ex.Message}");
             return false;
         }
     }
@@ -80,188 +76,193 @@ public class AudioRecordingService : IAudioRecordingService, IDisposable
         if (IsRecording)
             throw new InvalidOperationException("Recording is already in progress");
 
-        // Permission should already be granted at this point - ViewModel handles permission checking
+        // Check permission
         var permissionStatus = await CheckPermissionStatusAsync();
+        System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Permission status: {permissionStatus}");
+
         if (permissionStatus != PermissionStatus.Granted)
-            throw new UnauthorizedAccessException("Microphone permission not granted");
+        {
+            if (permissionStatus == PermissionStatus.Denied || permissionStatus == PermissionStatus.Restricted)
+            {
+                throw new UnauthorizedAccessException("Microphone access denied. Please enable it in System Settings > Privacy & Security > Microphone");
+            }
 
-        // Start recording and wait for manual stop
-        return await StartManualRecording(silenceTimeoutSeconds);
+            // Try to request permission
+            var granted = await RequestPermissionsAsync();
+            if (!granted)
+            {
+                throw new UnauthorizedAccessException("Microphone access denied");
+            }
+        }
+
+        System.Diagnostics.Debug.WriteLine("AudioRecordingService: Starting recording...");
+
+        return await RecordAudioAsync(silenceTimeoutSeconds);
     }
 
-    private async Task<byte[]> StartManualRecording(int silenceTimeoutSeconds)
-    {
-#if MACCATALYST
-        return await StartNativeRecordingMacCatalyst(silenceTimeoutSeconds);
-#else
-        return await StartPluginRecording(silenceTimeoutSeconds);
-#endif
-    }
-
-#if MACCATALYST
-    private async Task<byte[]> StartNativeRecordingMacCatalyst(int silenceTimeoutSeconds)
+    private async Task<byte[]> RecordAudioAsync(int silenceTimeoutSeconds)
     {
         try
         {
-            _audioData.Clear();
             _cancellationTokenSource = new CancellationTokenSource();
-            
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Starting native MacCatalyst recording (manual stop)...");
-            
-            // Setup audio session
-            var audioSession = AVAudioSession.SharedInstance();
-            audioSession.SetCategory(AVAudioSessionCategory.Record);
-            audioSession.SetActive(true);
-            
-            // Create temporary file path
-            _tempAudioFilePath = Path.Combine(Path.GetTempPath(), $"recording_{Guid.NewGuid()}.wav");
-            var url = NSUrl.FromFilename(_tempAudioFilePath);
-            
-            // Audio settings for recording
-            var settings = new AudioSettings
-            {
-                Format = AudioFormatType.LinearPCM,
-                SampleRate = 16000,
-                NumberChannels = 1,
-                LinearPcmBitDepth = 16
-            };
-            
-            // Create recorder
-            _nativeRecorder = AVAudioRecorder.Create(url, settings, out var error);
+
+            // Create recording file path in Documents directory
+            var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            _recordingFilePath = Path.Combine(documentsPath, $"recording_{Guid.NewGuid()}.caf");
+
+            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Recording to: {_recordingFilePath}");
+
+            var url = NSUrl.FromFilename(_recordingFilePath);
+
+            // Configure recording settings - using Apple Lossless for compatibility
+            var settings = new NSDictionary(
+                AVAudioSettings.AVFormatIDKey, NSNumber.FromInt32((int)AudioFormatType.AppleLossless),
+                AVAudioSettings.AVSampleRateKey, NSNumber.FromFloat(16000.0f),
+                AVAudioSettings.AVNumberOfChannelsKey, NSNumber.FromInt32(1),
+                AVAudioSettings.AVEncoderAudioQualityKey, NSNumber.FromInt32((int)AVAudioQuality.High)
+            );
+
+            // Create the recorder
+            NSError? error;
+            _recorder = AVAudioRecorder.Create(url, new AudioSettings(settings), out error);
+
             if (error != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Failed to create recorder - {error.Description}");
                 throw new Exception($"Failed to create audio recorder: {error.Description}");
-            
-            if (_nativeRecorder == null)
-                throw new Exception("Failed to create audio recorder");
-                
-            _nativeRecorder.PrepareToRecord();
-            _nativeRecorder.MeteringEnabled = true; // Enable metering for silence detection
-            IsRecording = true;
-            
+            }
+
+            if (_recorder == null)
+            {
+                throw new Exception("Failed to create audio recorder - returned null");
+            }
+
+            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Recorder created successfully");
+
+            // Prepare to record
+            if (!_recorder.PrepareToRecord())
+            {
+                throw new Exception("Failed to prepare recorder");
+            }
+
+            // Enable metering for silence detection
+            _recorder.MeteringEnabled = true;
+
             // Start recording
-            _nativeRecorder.Record();
-            
-            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Recording started, will stop after {silenceTimeoutSeconds}s of silence...");
-            
-            // Monitor for silence and auto-stop
-            var silenceTask = MonitorSilenceAsync(silenceTimeoutSeconds, _cancellationTokenSource.Token);
-            await silenceTask;
-            
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Silence detected, stopping native recording...");
-            
+            if (!_recorder.Record())
+            {
+                System.Diagnostics.Debug.WriteLine("AudioRecordingService: Record() returned false");
+                throw new Exception("Failed to start recording. Please check System Settings > Privacy & Security > Microphone and ensure this app has access.");
+            }
+
+            IsRecording = true;
+            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Recording started, monitoring for {silenceTimeoutSeconds}s of silence...");
+
+            // Monitor for silence
+            await MonitorSilenceAsync(silenceTimeoutSeconds, _cancellationTokenSource.Token);
+
             // Stop recording
-            await StopNativeRecordingMacCatalyst();
-            
-            // Read recorded file
-            var audioBytes = await File.ReadAllBytesAsync(_tempAudioFilePath);
-            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Read {audioBytes.Length} bytes from recorded file");
-            
-            // Clean up temp file
-            try
+            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Stopping recording...");
+            _recorder.Stop();
+            IsRecording = false;
+
+            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Recording duration: {_recorder.CurrentTime}s");
+
+            // Read the recorded file
+            if (!File.Exists(_recordingFilePath))
             {
-                File.Delete(_tempAudioFilePath);
+                throw new Exception("Recorded file not found");
             }
-            catch (Exception ex)
+
+            var fileInfo = new FileInfo(_recordingFilePath);
+            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Recorded file size: {fileInfo.Length} bytes");
+
+            var audioBytes = await File.ReadAllBytesAsync(_recordingFilePath);
+
+            // Verify we have audio data
+            if (audioBytes.Length > 100)
             {
-                System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Could not delete temp file: {ex.Message}");
+                var hasData = audioBytes.Skip(100).Take(1000).Any(b => b != 0);
+                System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Has non-zero audio data: {hasData}");
             }
-            
+
+            // Clean up
+            _recorder.Dispose();
+            _recorder = null;
+
             return audioBytes;
         }
-        catch (OperationCanceledException)
-        {
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Recording cancelled");
-            IsRecording = false;
-            _nativeRecorder = null;
-            return Array.Empty<byte>();
-        }
         catch (Exception ex)
         {
             IsRecording = false;
-            _nativeRecorder = null;
-            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Native recording failed - {ex.Message}");
-            throw new Exception($"Failed to start native recording: {ex.Message}");
-        }
-    }
-    
-    private Task StopNativeRecordingMacCatalyst()
-    {
-        if (_nativeRecorder == null || !IsRecording)
-            return Task.CompletedTask;
-            
-        try
-        {
-            _nativeRecorder.Stop();
-            AVAudioSession.SharedInstance().SetActive(false);
-        }
-        finally
-        {
-            IsRecording = false;
-            _nativeRecorder = null;
-            _cancellationTokenSource?.Dispose();
-            _cancellationTokenSource = null;
-        }
-        
-        return Task.CompletedTask;
-    }
-#endif
-
-    private async Task<byte[]> StartPluginRecording(int silenceTimeoutSeconds)
-    {
-        try
-        {
-            _audioData.Clear();
-            _cancellationTokenSource = new CancellationTokenSource();
-            
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Creating recorder...");
-            
-            // Create audio recorder
-            _recorder = _audioManager.CreateRecorder();
-            
-            IsRecording = true;
-            
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Starting recording...");
-            
-            // Start recording
-            await _recorder.StartAsync();
-            
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Recording started, waiting for manual stop...");
-            
-            // Wait indefinitely until manually stopped
-            var tcs = new TaskCompletionSource<bool>();
-            _cancellationTokenSource.Token.Register(() => tcs.TrySetResult(true));
-            await tcs.Task;
-            
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Manual stop requested, stopping recording...");
-            
-            // Stop recording and get data
-            await StopRecordingInternal();
-            
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Recording stopped, creating audio file...");
-            
-            var audioBytes = _audioData.ToArray();
-            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Total audio data collected: {audioBytes.Length} bytes");
-            
-            // Check if we have actual audio data (not just zeros)
-            var hasNonZeroData = audioBytes.Any(b => b != 0);
-            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Audio contains non-zero data: {hasNonZeroData}");
-            
-            if (audioBytes.Length == 0)
-            {
-                System.Diagnostics.Debug.WriteLine("AudioRecordingService: Warning - No audio data captured, generating test audio");
-                // Create a minimal WAV file with test audio if no data was captured
-                audioBytes = GenerateTestAudioData(16000); // 1 second of test audio at 16kHz
-            }
-            
-            // Create a 16kHz WAV file with the actual recorded audio data
-            return CreateWavFile(audioBytes, 16000);
-        }
-        catch (Exception ex)
-        {
-            IsRecording = false;
+            _recorder?.Dispose();
             _recorder = null;
             System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Recording failed - {ex.Message}");
-            throw new Exception($"Failed to start recording: {ex.Message}");
+            throw;
+        }
+    }
+
+    private async Task MonitorSilenceAsync(int silenceThresholdSeconds, CancellationToken cancellationToken)
+    {
+        var recordingStart = DateTime.Now;
+        var lastAudioActivity = DateTime.Now;
+        const int maxRecordingSeconds = 20;
+        const float silenceThresholdDb = -30.0f;
+
+        System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Monitoring - will stop after {silenceThresholdSeconds}s silence or {maxRecordingSeconds}s total");
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested && IsRecording)
+            {
+                await Task.Delay(200, cancellationToken);
+
+                var now = DateTime.Now;
+                var recordingDuration = now - recordingStart;
+                bool audioDetected = false;
+
+                if (_recorder != null && _recorder.Recording)
+                {
+                    // Grace period - assume activity for first 3 seconds
+                    if (recordingDuration.TotalSeconds < 3.0)
+                    {
+                        audioDetected = true;
+                        lastAudioActivity = now;
+                    }
+                    else if (_recorder.MeteringEnabled)
+                    {
+                        _recorder.UpdateMeters();
+                        var peakPower = _recorder.PeakPower(0);
+
+                        if (peakPower > silenceThresholdDb)
+                        {
+                            audioDetected = true;
+                            lastAudioActivity = now;
+                            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Audio detected - peak: {peakPower:F1}dB");
+                        }
+                    }
+                }
+
+                var silenceDuration = now - lastAudioActivity;
+
+                // Check if silence threshold reached
+                if (silenceDuration.TotalSeconds >= silenceThresholdSeconds && recordingDuration.TotalSeconds > 3)
+                {
+                    System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Silence threshold reached ({silenceThresholdSeconds}s)");
+                    break;
+                }
+
+                // Check max duration
+                if (recordingDuration.TotalSeconds > maxRecordingSeconds)
+                {
+                    System.Diagnostics.Debug.WriteLine("AudioRecordingService: Max recording duration reached");
+                    break;
+                }
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Monitoring cancelled");
         }
     }
 
@@ -272,163 +273,20 @@ public class AudioRecordingService : IAudioRecordingService, IDisposable
 
         _cancellationTokenSource?.Cancel();
 
-#if MACCATALYST
-        await StopNativeRecordingMacCatalyst();
-#else
-        await StopRecordingInternal();
-#endif
-    }
-
-    private async Task StopRecordingInternal()
-    {
-        if (_recorder == null || !IsRecording)
-            return;
-
-        try
+        if (_recorder != null)
         {
-            var audioSource = await _recorder.StopAsync();
-            
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Extracting audio data from source...");
-            
-            // Plugin.Maui.Audio has issues with direct data access
-            // For now, we'll generate test audio to verify the pipeline works
-            // In production, you'd use platform-specific recording APIs
-            
-            if (audioSource != null)
-            {
-                try
-                {
-                    // Try to access the stream using the IAudioSource interface
-                    // The plugin should expose GetAudioStream method
-                    var streamMethod = audioSource.GetType().GetMethod("GetAudioStream");
-                    if (streamMethod != null)
-                    {
-                        var stream = streamMethod.Invoke(audioSource, null) as Stream;
-                        if (stream != null && stream.Length > 0)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Found audio stream with {stream.Length} bytes");
-                            stream.Position = 0;
-                            using var memoryStream = new MemoryStream();
-                            await stream.CopyToAsync(memoryStream);
-                            var audioBytes = memoryStream.ToArray();
-                            
-                            if (audioBytes.Length > 44) // More than just WAV header
-                            {
-                                System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Extracted {audioBytes.Length} bytes of real audio data");
-                                _audioData.AddRange(audioBytes);
-                                return;
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Error accessing audio stream: {ex.Message}");
-                }
-            }
-            
-            // Fallback: Generate test audio data for development/testing
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Using test audio data due to plugin limitations");
-            _audioData.AddRange(GenerateTestAudioData(48000)); // 3 seconds of 16kHz mono audio
-        }
-        finally
-        {
-            IsRecording = false;
+            _recorder.Stop();
+            _recorder.Dispose();
             _recorder = null;
-            _cancellationTokenSource?.Dispose();
-            _cancellationTokenSource = null;
         }
-    }
 
-    private async Task MonitorSilenceAsync(int silenceThresholdSeconds, CancellationToken cancellationToken)
-    {
-        var recordingStart = DateTime.Now;
-        var lastAudioActivity = DateTime.Now;
-        const int maxRecordingSeconds = 20;
-        const float silenceThresholdDb = -30.0f; // Less sensitive threshold - requires louder sounds
-        
-        System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Starting silence monitor - will stop after {silenceThresholdSeconds}s of silence (max {maxRecordingSeconds}s total)");
-        try
-        {
-            while (!cancellationToken.IsCancellationRequested && IsRecording)
-            {
-                await Task.Delay(200, cancellationToken); // Check every 200ms
-                var now = DateTime.Now;
-                var recordingDuration = now - recordingStart;
-                bool audioDetected = false;
-                
-#if MACCATALYST
-                // For MacCatalyst, check if the recorder is still recording and has audio levels
-                if (_nativeRecorder != null && _nativeRecorder.Recording)
-                {
-                    // Initial grace period - assume activity for first 3 seconds
-                    if (recordingDuration.TotalSeconds < 3.0)
-                    {
-                        audioDetected = true;
-                        lastAudioActivity = now;
-                        System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Grace period - assuming activity");
-                    }
-                    else if (_nativeRecorder.MeteringEnabled)
-                    {
-                        _nativeRecorder.UpdateMeters();
-                        var averagePower = _nativeRecorder.AveragePower(0);
-                        var peakPower = _nativeRecorder.PeakPower(0);
-                        
-                        System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Metering at {recordingDuration.TotalSeconds:F1}s - avg: {averagePower:F1}dB, peak: {peakPower:F1}dB, threshold: {silenceThresholdDb:F1}dB");
-                        
-                        // Use peak power for detection
-                        if (peakPower > silenceThresholdDb) 
-                        {
-                            audioDetected = true;
-                            lastAudioActivity = now;
-                            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: AUDIO DETECTED - Resetting silence timer");
-                        }
-                        else
-                        {
-                            audioDetected = false;
-                            System.Diagnostics.Debug.WriteLine($"AudioRecordingService: SILENCE - No audio above threshold");
-                        }
-                    }
-                    else
-                    {
-                        // If metering is not available after grace period, assume silence
-                        System.Diagnostics.Debug.WriteLine($"AudioRecordingService: WARNING - Metering not enabled! Treating as silence");
-                        audioDetected = false;
-                    }
-                }
-#endif
-                var silenceDuration = now - lastAudioActivity;
-                System.Diagnostics.Debug.WriteLine($"AudioRecordingService: MONITOR - Total: {recordingDuration.TotalSeconds:F1}s, Silence: {silenceDuration.TotalSeconds:F1}s, Audio: {audioDetected}, Threshold: {silenceThresholdSeconds}s");
-                if (silenceDuration.TotalSeconds >= silenceThresholdSeconds && recordingDuration.TotalSeconds > 3)
-                {
-                    System.Diagnostics.Debug.WriteLine($"AudioRecordingService: Silence threshold reached ({silenceThresholdSeconds}s), stopping recording...");
-#if MACCATALYST
-                    await StopNativeRecordingMacCatalyst();
-#endif
-                    IsRecording = false;
-                    break;
-                }
-                if (recordingDuration.TotalSeconds > maxRecordingSeconds)
-                {
-                    System.Diagnostics.Debug.WriteLine("AudioRecordingService: Max recording duration reached, stopping...");
-#if MACCATALYST
-                    
-                    await StopNativeRecordingMacCatalyst();
-#endif
-                    IsRecording = false;
-                    break;
-                }
-            }
-        }
-        catch (TaskCanceledException)
-        {
-            System.Diagnostics.Debug.WriteLine("AudioRecordingService: Silence monitor cancelled");
-        }
+        IsRecording = false;
+
+        await Task.CompletedTask;
     }
 
     public void Dispose()
     {
-        // Dispose resources if needed
         if (IsRecording)
         {
             try
@@ -437,61 +295,20 @@ public class AudioRecordingService : IAudioRecordingService, IDisposable
             }
             catch { }
         }
-        
-#if MACCATALYST
-        if (_nativeRecorder != null)
-        {
-            _nativeRecorder.Dispose();
-            _nativeRecorder = null;
-        }
-#endif
+
+        _recorder?.Dispose();
+        _recorder = null;
         _cancellationTokenSource?.Dispose();
         _cancellationTokenSource = null;
-    }
 
-    private byte[] GenerateTestAudioData(int sampleRate)
-    {
-        // Generate a 1-second test tone (440Hz sine wave) for testing
-        int durationSeconds = 1;
-        int totalSamples = sampleRate * durationSeconds;
-        byte[] waveData = new byte[totalSamples * 2]; // 16-bit PCM, so 2 bytes per sample
-        double frequency = 440.0;
-        double amplitude = 0.5;
-        double maxAmplitude = short.MaxValue * amplitude;
-        double twoPiF = 2.0 * Math.PI * frequency;
-        for (int i = 0; i < totalSamples; i++)
+        // Clean up recording file if it exists
+        if (_recordingFilePath != null && File.Exists(_recordingFilePath))
         {
-            double sample = maxAmplitude * Math.Sin(twoPiF * i / sampleRate);
-            short intSample = (short)sample;
-            waveData[i * 2] = (byte)(intSample & 0xFF);
-            waveData[i * 2 + 1] = (byte)((intSample >> 8) & 0xFF);
+            try
+            {
+                File.Delete(_recordingFilePath);
+            }
+            catch { }
         }
-        return CreateWavFile(waveData, sampleRate);
-    }
-
-    private byte[] CreateWavFile(byte[] audioData, int sampleRate)
-    {
-        using var memoryStream = new MemoryStream();
-        using (var writer = new BinaryWriter(memoryStream))
-        {
-            // Write WAV header
-            writer.Write(Encoding.ASCII.GetBytes("RIFF"));
-            writer.Write(36 + audioData.Length);
-            writer.Write(Encoding.ASCII.GetBytes("WAVE"));
-            writer.Write(Encoding.ASCII.GetBytes("fmt "));
-            writer.Write(16); // Subchunk1Size for PCM
-            writer.Write((short)1); // AudioFormat: PCM
-            writer.Write((short)1); // NumChannels: 1 (mono)
-            writer.Write(sampleRate);
-            writer.Write(sampleRate * 2); // ByteRate
-            writer.Write((short)2); // BlockAlign
-            writer.Write((short)16); // BitsPerSample
-            writer.Write(Encoding.ASCII.GetBytes("data"));
-            writer.Write(audioData.Length);
-            
-            // Write audio data
-            writer.Write(audioData);
-        }
-        return memoryStream.ToArray();
     }
 }

@@ -36,5 +36,9 @@
 	<string>Assets.xcassets/appicon.appiconset</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>This app needs access to microphone for voice recording functionality.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 </dict>
 </plist>

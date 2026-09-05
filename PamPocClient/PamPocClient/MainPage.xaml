@@ -33,11 +33,14 @@
 
         <!-- Main content area -->
         <ScrollView Grid.Row="0" Padding="20">
-            <VerticalStackLayout Spacing="20" VerticalOptions="Center">
+            <Grid RowSpacing="20" RowDefinitions="Auto,Auto,*">
+                <Image Source="intelliabb.png" 
+                       Aspect="AspectFit" 
+                       HeightRequest="28" />
                 
                 <!-- Pam logo/title area -->
-                <VerticalStackLayout Spacing="10" HorizontalOptions="Center">
-                    <Label Text="Pam"
+                <VerticalStackLayout Spacing="10" Grid.Row="1">
+                    <Label Text="Hi, I am Pam!"
                            FontSize="36"
                            FontAttributes="Bold"
                            TextColor="#2D3748"
@@ -52,7 +55,9 @@
                 <!-- Chat messages area -->
                 <CollectionView ItemsSource="{Binding Messages}"
                               Margin="0,40,0,0"
-                              BackgroundColor="Transparent">
+                              BackgroundColor="Transparent"
+                              Grid.Row="2"
+                              VerticalOptions="End">
                     <CollectionView.ItemTemplate>
                         <DataTemplate x:DataType="models:ChatMessage">
                             <Grid Padding="0,8">
@@ -76,8 +81,7 @@
                         </DataTemplate>
                     </CollectionView.ItemTemplate>
                 </CollectionView>
-
-            </VerticalStackLayout>
+            </Grid>
         </ScrollView>
 
         <!-- Input section at bottom -->
@@ -126,10 +130,7 @@
                         BorderWidth="0"
                         Command="{Binding SendMessageCommand}"
                         IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolConverter}}" />
-                
             </Grid>
         </Border>
-               
     </Grid>
-
 </ContentPage>

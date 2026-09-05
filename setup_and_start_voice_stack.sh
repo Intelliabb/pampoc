@@ -9,7 +9,7 @@ STT_HOST="127.0.0.1"
 STT_PORT="8001"
 
 # Project locations
-PROJ_ROOT="$HOME/Projects/VoiceAgent"
+PROJ_ROOT="$HOME/Projects/pampoc"
 API_DIR="$PROJ_ROOT/PamPocApi"
 
 # Tools & models

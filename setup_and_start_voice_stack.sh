@@ -168,25 +168,16 @@ echo "Hello from Piper on your local stack." \
 
 deactivate || true
 
-# ───────────────────────────── 5) Write env file for your API project ─────────────────────────────
-ENV_FILE="$API_DIR/gateway.env"
-cat > "$ENV_FILE" <<EOF
-# Source this in the PamPocApi project before 'dotnet run'
-export STT_URL="http://$STT_HOST:$STT_PORT/v1/audio/transcriptions"
-export LLM_URL="http://localhost:11434/v1/chat/completions"
-export TTS_MODE="cli"
-export PIPER_BIN="$PIPER_BIN"
-export TTS_VOICE_PATH="$PIPER_VOICE_ONNX"
-export DEFAULT_LLM_MODEL="$OLLAMA_MODEL"
-EOF
-
-# ───────────────────────────── 6) Summary ─────────────────────────────
+# ───────────────────────────── 5) Summary ─────────────────────────────
 msg "✅ Back-end ready."
 echo "• LLM  : http://localhost:11434/v1 (Ollama, model: $OLLAMA_MODEL)"
 echo "• STT  : http://$STT_HOST:$STT_PORT/v1/audio/transcriptions (whisper.cpp)"
 echo "• TTS  : Piper CLI → $PIPER_BIN  (voice: $PIPER_VOICE_ONNX)"
 echo "• Logs : $LOG_DIR"
-echo "• Env  : $ENV_FILE  (run: 'source \"$ENV_FILE\"' before starting your API)"
+
+echo
+msg "No config editing needed — appsettings.Development.json already points at these paths."
+echo "  (it uses ~/… paths, expanded at startup; override any value with PAMPOC__* env vars)"
 
 echo
 msg "Quick pings:"

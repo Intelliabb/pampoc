@@ -20,11 +20,20 @@ public static class ConfigurationExtensions
                 options.PiperBin = Environment.GetEnvironmentVariable("PAMPOC__PIPER_BIN") ?? options.PiperBin;
                 options.TtsVoicePath = Environment.GetEnvironmentVariable("PAMPOC__TTS_VOICE_PATH") ?? options.TtsVoicePath;
                 options.TtsUrl = Environment.GetEnvironmentVariable("PAMPOC__TTS_URL") ?? options.TtsUrl;
-                
+
+                // Local tool paths are configured as ~/... so one committed config works on any machine
+                options.PiperBin = ExpandHome(options.PiperBin);
+                options.TtsVoicePath = ExpandHome(options.TtsVoicePath);
+
                 // Custom validation
                 options.Validate();
             });
 
         return services;
     }
+
+    private static string ExpandHome(string path) =>
+        path.StartsWith("~/", StringComparison.Ordinal)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..])
+            : path;
 }

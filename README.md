@@ -185,29 +185,6 @@ The client's backend address is currently a constant — `BaseUrl` in
 
 ---
 
-## Using this repo in a workshop
-
-The codebase is deliberately shaped for hands-on labs. Suggested progression:
-
-1. **Change Pam's personality.** Edit `PromptService.GetSystemPrompt()` and restart the API. Or send
-   `system_prompt` per-request to `/api/voice` and compare — no restart needed.
-2. **Swap the LLM.** `ollama pull llama3.2`, then set `PAMPOC__DEFAULT_LLM_MODEL`. Discuss quality vs. latency
-   using the `timingsMs` payload.
-3. **Swap the voice.** Download another Piper voice and repoint `TtsVoicePath`.
-4. **Trade accuracy for speed in STT.** Point `WHISPER_MODEL` at `ggml-base.en` or `ggml-medium.en`.
-5. **Extend the conversation.** The gateway is currently stateless — each turn sends only the latest user
-   message upstream, and the client trims history to 10 messages. Adding real multi-turn memory is a
-   satisfying, self-contained exercise.
-6. **Add tools/function calling.** `ChatService` is a single well-isolated seam for it.
-7. **Go remote.** Repoint `LlmUrl` at any OpenAI-compatible endpoint and discuss what changes about privacy,
-   latency and cost.
-
-Talking points that come up naturally: why audio is normalized to 16 kHz mono PCM, why client-side silence
-detection matters for perceived latency, where the pipeline serializes vs. where it could stream, and the
-HIPAA-flavored escalation rules baked into the system prompt.
-
----
-
 ## Troubleshooting
 
 **`whisper-server` isn't running.** `curl http://127.0.0.1:8001` — if it's down, check

@@ -46,7 +46,7 @@ the setup script.
 │  1. ffmpeg → 16 kHz mono 16-bit PCM WAV
 │  2. STT  ──────────────────────────────►  whisper.cpp server   :8001
 │  3. LLM  ──────────────────────────────►  Ollama (OpenAI API)  :11434
-│  4. TTS  ──────────────────────────────►  Piper (CLI or HTTP)
+│  4. TTS  ──────────────────────────────►  Piper HTTP server    :5000
 │                          │
 │  returns { transcript, assistantText, audioBase64, usage, timingsMs }
 └──────────────────────────┘
@@ -58,7 +58,7 @@ Three local model services back the gateway:
 |---|---|---|---|
 | Speech-to-text | [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server | `ggml-small.en` | `http://127.0.0.1:8001/v1/audio/transcriptions` |
 | LLM | [Ollama](https://ollama.com) (OpenAI-compatible) | `mistral:instruct` | `http://localhost:11434/v1/chat/completions` |
-| Text-to-speech | [Piper](https://github.com/rhasspy/piper) | `en_US-amy-medium` | CLI subprocess (or HTTP on `:5000`) |
+| Text-to-speech | [Piper](https://github.com/OHF-voice/piper1-gpl) `piper.http_server` | `en_US-amy-medium` | `http://127.0.0.1:5000/` |
 
 Because whisper.cpp and Ollama both expose **OpenAI-compatible** routes, the gateway code is a good starting
 point for pointing the same app at a hosted provider — another common workshop exercise.
@@ -89,7 +89,8 @@ at runtime** — the API shells out to it to normalize incoming audio.
 This will:
 - start Ollama and pull `mistral:instruct` (override with `OLLAMA_MODEL=llama3.2 ./setup_and_start_voice_stack.sh`)
 - clone + build whisper.cpp into `~/Library/tools/whisper.cpp` and launch `whisper-server` on port 8001
-- create a Python venv at `~/Library/tools/venvs/piper`, install `piper-tts`, download the `en_US-amy-medium` voice
+- create a Python venv at `~/Library/tools/venvs/piper`, install `piper-tts[http]`, download the `en_US-amy-medium`
+  voice and launch Piper's own `piper.http_server` on port 5000
 No configuration editing is required — `appsettings.Development.json` already points at the locations the
 script installs into, using `~/…` paths that are expanded at startup.
 
@@ -108,7 +109,7 @@ The API listens on **http://localhost:5269**. Verify the whole stack is reachabl
 
 ```bash
 curl http://localhost:5269/api/health
-# { "ok": true, "services": { "llm": "up", "stt": "up", "tts": "cli" } }
+# { "ok": true, "services": { "llm": "up", "stt": "up", "tts": "http" } }
 ```
 
 Smoke-test the full pipeline with the bundled clip:
@@ -175,7 +176,7 @@ configuration for local runs.
 | `SttUrl` | whisper.cpp transcription endpoint |
 | `LlmUrl` | OpenAI-compatible chat completions endpoint |
 | `DefaultLlmModel` | Model name used when a request doesn't specify one |
-| `TtsMode` | `cli` (spawn Piper) or `http` (POST to a Piper server) |
+| `TtsMode` | `http` (POST to `piper.http_server`, the default) or `cli` (spawn the Piper binary per request) |
 | `PiperBin` | Path to the Piper executable (`cli` mode) |
 | `TtsVoicePath` | Path to the `.onnx` voice (`cli` mode) |
 | `TtsUrl` | Piper HTTP endpoint (`http` mode) |
@@ -209,9 +210,10 @@ The web client reads it from the `ApiBaseUrl` setting, so `ApiBaseUrl=http://hos
 **`Audio conversion failed`.** `ffmpeg` isn't on the API process's `PATH`. Install with `brew install ffmpeg`
 and restart the API from a shell where `which ffmpeg` succeeds.
 
-**TTS returns a 502 / Piper CLI failed.** Confirm the voice file exists at
-`~/Library/models/piper/en_US-amy-medium.onnx` and that `~/Library/tools/venvs/piper/bin/piper` is
-executable. Re-running the setup script restores both.
+**TTS returns a 502.** Check that Piper's server is up with `curl http://127.0.0.1:5000/voices`, and read
+`~/Library/Logs/voice-stack/piper-http.log` if it isn't. Confirm the voice file exists at
+`~/Library/models/piper/en_US-amy-medium.onnx`. Re-running the setup script restarts the server and
+restores the voice. In `cli` mode instead, confirm `~/Library/tools/venvs/piper/bin/piper` is executable.
 
 **Port 5269 is already in use.** An API instance is still running from an earlier session. Find it with
 `lsof -nP -iTCP:5269 -sTCP:LISTEN` and kill that PID, or run on another port with

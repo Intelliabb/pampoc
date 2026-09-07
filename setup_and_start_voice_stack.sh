@@ -8,6 +8,10 @@ OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:instruct}"
 STT_HOST="127.0.0.1"
 STT_PORT="8001"
 
+# TTS server bind (Piper's own HTTP server)
+TTS_HOST="127.0.0.1"
+TTS_PORT="5000"
+
 # Project locations
 PROJ_ROOT="$HOME/Projects/pampoc"
 API_DIR="$PROJ_ROOT/PamPocApi"
@@ -26,7 +30,7 @@ WHISPER_MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggm
 
 # Piper (TTS)
 PIPER_VENV="$TOOLS_DIR/venvs/piper"
-PIPER_BIN="$PIPER_VENV/bin/piper"
+PIPER_PY="$PIPER_VENV/bin/python"
 PIPER_MODELS_DIR="$HOME/Library/models/piper"
 PIPER_VOICE_NAME="en_US-amy-medium"
 PIPER_VOICE_ONNX="$PIPER_MODELS_DIR/${PIPER_VOICE_NAME}.onnx"
@@ -144,15 +148,14 @@ for i in {1..20}; do
   sleep 0.25
 done
 
-# ───────────────────────────── 4) TTS (Piper CLI) ─────────────────────────────
+# ───────────────────────────── 4) TTS (Piper HTTP server) ─────────────────────────────
 msg "Setting up Piper TTS (Python venv in $PIPER_VENV)…"
 if [ ! -d "$PIPER_VENV" ]; then
   "$(brew --prefix)/opt/python@3.11/bin/python3.11" -m venv "$PIPER_VENV"
 fi
-# shellcheck disable=SC1091
-source "$PIPER_VENV/bin/activate"
-python -m pip -q install --upgrade pip wheel >/dev/null
-python -m pip -q install piper-tts >/dev/null
+"$PIPER_PY" -m pip -q install --upgrade pip wheel >/dev/null
+# The [http] extra adds flask, which piper.http_server imports.
+"$PIPER_PY" -m pip -q install 'piper-tts[http]' >/dev/null
 
 if [ ! -f "$PIPER_VOICE_ONNX" ]; then
   msg "Downloading Piper voice → $PIPER_VOICE_ONNX"
@@ -162,17 +165,41 @@ if [ ! -f "$PIPER_VOICE_JSON" ]; then
   curl -L "$PIPER_VOICE_JSON_URL" -o "$PIPER_VOICE_JSON"
 fi
 
-# Optional smoke test (writes /tmp/tts_test.wav)
-echo "Hello from Piper on your local stack." \
-  | "$PIPER_BIN" --model "$PIPER_VOICE_ONNX" --output_file /tmp/tts_test.wav >/dev/null 2>&1 || true
+# Restart server if already running
+if [ -f "$RUN_DIR/piper-http.pid" ] && ps -p "$(cat "$RUN_DIR/piper-http.pid")" >/dev/null 2>&1; then
+  warn "piper.http_server already running (PID $(cat "$RUN_DIR/piper-http.pid")). Restarting…"
+  kill "$(cat "$RUN_DIR/piper-http.pid")" || true
+  sleep 0.4
+fi
 
-deactivate || true
+# --data-dir lets a request name any voice in the models dir; --model is the default one.
+msg "Starting piper.http_server @ http://$TTS_HOST:$TTS_PORT (synthesis path '/')…"
+nohup "$PIPER_PY" -m piper.http_server \
+  --host "$TTS_HOST" \
+  --port "$TTS_PORT" \
+  --model "$PIPER_VOICE_ONNX" \
+  --data-dir "$PIPER_MODELS_DIR" \
+  > "$LOG_DIR/piper-http.log" 2>&1 &
+
+echo $! > "$RUN_DIR/piper-http.pid"
+
+# Readiness check (model load takes a moment on first start)
+for i in {1..40}; do
+  if curl -sSf "http://$TTS_HOST:$TTS_PORT/voices" >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done
+
+# Optional smoke test (writes /tmp/tts_test.wav)
+curl -sS -X POST "http://$TTS_HOST:$TTS_PORT/" \
+  -H 'Content-Type: application/json' \
+  -d "{\"text\":\"Hello from Piper on your local stack.\",\"voice\":\"$PIPER_VOICE_NAME\"}" \
+  -o /tmp/tts_test.wav >/dev/null 2>&1 || true
 
 # ───────────────────────────── 5) Summary ─────────────────────────────
 msg "✅ Back-end ready."
 echo "• LLM  : http://localhost:11434/v1 (Ollama, model: $OLLAMA_MODEL)"
 echo "• STT  : http://$STT_HOST:$STT_PORT/v1/audio/transcriptions (whisper.cpp)"
-echo "• TTS  : Piper CLI → $PIPER_BIN  (voice: $PIPER_VOICE_ONNX)"
+echo "• TTS  : http://$TTS_HOST:$TTS_PORT/ (piper.http_server, voice: $PIPER_VOICE_NAME)"
 echo "• Logs : $LOG_DIR"
 
 echo
@@ -183,5 +210,6 @@ echo
 msg "Quick pings:"
 curl -s http://localhost:11434/api/tags >/dev/null && echo "  ✓ Ollama up" || echo "  ✗ Ollama unavailable"
 curl -s "http://$STT_HOST:$STT_PORT"           >/dev/null && echo "  ✓ whisper-server up" || echo "  ✗ whisper-server unavailable"
+curl -sSf "http://$TTS_HOST:$TTS_PORT/voices"  >/dev/null 2>&1 && echo "  ✓ piper.http_server up" || echo "  ✗ piper.http_server unavailable"
 
 exit 0

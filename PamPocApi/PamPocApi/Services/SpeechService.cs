@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using PamPocApi.Configuration;
 using PamPocApi.Models;
@@ -12,6 +13,24 @@ public class SpeechService : ISpeechService
     private readonly HttpClient _httpClient;
     private readonly ServiceConfiguration _config;
     private readonly JsonSerializerOptions _jsonOptions;
+
+    // whisper.cpp labels non-speech audio with bracketed markers — "[BLANK_AUDIO]",
+    // "[MUSIC]", "[INAUDIBLE]" — usually as a segment of their own. Nobody said them,
+    // so they must not reach the transcript or the LLM prompt. Matches the known
+    // markers by name, plus any all-caps bracketed token. (whisper's own
+    // suppress_nst option is not a substitute: it makes the model hallucinate
+    // speech over the silence instead.)
+    private static readonly Regex NonSpeechAnnotation = new(
+        @"[\[(]\s*(?:(?i:blank[_ ]?audio|silence|inaudible|music|sound|noise|laughter|applause|typing)|[A-Z0-9_ \-]+)\s*[\])]",
+        RegexOptions.Compiled);
+
+    // Whisper is trained on closed captions, where ">>" marks a change of speaker.
+    // It reproduces the marker even though nobody said it. Anchored to the start of
+    // a segment, which is the only place a caption marker appears — a ">>" inside a
+    // sentence is something the speaker actually said.
+    private static readonly Regex CaptionSpeakerMarker = new(
+        @"^[^\S\n]*>>+[^\S\n]*",
+        RegexOptions.Multiline | RegexOptions.Compiled);
 
     public SpeechService(HttpClient httpClient, IOptions<ServiceConfiguration> config, IOptionsMonitor<JsonSerializerOptions> jsonOptions)
     {
@@ -63,10 +82,12 @@ public class SpeechService : ISpeechService
 
         var sttResult = JsonSerializer.Deserialize<SttResult>(responseText, _jsonOptions);
 
-        if (sttResult is null || string.IsNullOrWhiteSpace(sttResult.Text))
-            return (false, string.Empty, "STT returned empty text");
+        var transcript = CleanTranscript(sttResult?.Text);
 
-        return (true, sttResult.Text, null);
+        if (string.IsNullOrEmpty(transcript))
+            return (false, string.Empty, "STT returned no speech");
+
+        return (true, transcript, null);
     }
 
     public async Task<(bool Success, byte[] AudioData, string? Error)> ConvertTextToSpeechAsync(
@@ -135,6 +156,20 @@ public class SpeechService : ISpeechService
             return (false, Array.Empty<byte>(), $"Piper CLI failed (exit {process.ExitCode}). {stderr}");
 
         return (true, memoryStream.ToArray(), null);
+    }
+
+    /// <summary>
+    /// Drops whisper's non-speech annotations and caption speaker markers, then
+    /// collapses the per-segment newlines and padding into a single clean utterance.
+    /// </summary>
+    private static string CleanTranscript(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var stripped = NonSpeechAnnotation.Replace(text, " ");
+        stripped = CaptionSpeakerMarker.Replace(stripped, string.Empty);
+        return string.Join(' ', stripped.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     private async Task<byte[]> ConvertAudioToWavAsync(IFormFile audioFile, CancellationToken cancellationToken)

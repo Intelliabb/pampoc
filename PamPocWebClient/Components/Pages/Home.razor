@@ -1,0 +1,293 @@
+@page "/"
+@rendermode InteractiveServer
+@using PamPocWebClient.Models
+@using PamPocWebClient.Services
+@inject IVoiceService VoiceService
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Pam — Voice Assistant</PageTitle>
+
+<div class="app">
+    @if (_isBusy)
+    {
+        <div class="overlay">
+            <div class="spinner"></div>
+            <div class="overlay-text">@_statusMessage</div>
+        </div>
+    }
+
+    <div class="content" id="chat-scroll">
+        <img class="logo" src="images/intelliabb.png" alt="intelliabb" />
+
+        <div class="hero">
+            <h1>Hi, I am Pam!</h1>
+            <p>How can I help you today?</p>
+        </div>
+
+        <div class="messages">
+            @foreach (var message in _messages)
+            {
+                <div class="row @(message.IsUser ? "row-user" : "row-assistant")">
+                    <div class="bubble @(message.IsUser ? "bubble-user" : "bubble-assistant")">
+                        <div class="bubble-text">@message.Content</div>
+                        <div class="bubble-time">@message.Timestamp.ToString("HH:mm")</div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="composer">
+        <input class="entry"
+               type="text"
+               placeholder="Message Pam..."
+               @bind="_messageText"
+               @bind:event="oninput"
+               @onkeydown="OnKeyDownAsync"
+               disabled="@(_isBusy || _isRecording)" />
+
+        <button class="btn btn-mic @(_isRecording ? "recording" : "")"
+                title="@(_isRecording ? "Stop recording" : "Record a message")"
+                @onclick="ToggleRecordingAsync"
+                disabled="@(_isBusy || _isStartingRecording)">
+            @(_isRecording ? "⏹️" : "🎙️")
+        </button>
+
+        <button class="btn btn-send"
+                title="Send"
+                @onclick="SendMessageAsync"
+                disabled="@(_isBusy || _isRecording)">
+            →
+        </button>
+    </div>
+
+    <div class="status">@_statusMessage</div>
+</div>
+
+@code {
+    private const int ContextWindowMessageCount = 10;
+
+    private readonly List<ChatMessage> _messages = [];
+    private string _messageText = string.Empty;
+    private bool _isBusy;
+    private bool _isRecording;
+    private bool _isStartingRecording;
+    private string _statusMessage = "Ready";
+
+    private IJSObjectReference? _audioModule;
+    private DotNetObjectReference<Home>? _selfRef;
+    private bool _shouldScroll;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _audioModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/pam-audio.js");
+            _selfRef = DotNetObjectReference.Create(this);
+            await InitializeAsync();
+        }
+
+        if (_shouldScroll && _audioModule is not null)
+        {
+            _shouldScroll = false;
+            await _audioModule.InvokeVoidAsync("scrollToBottom", "#chat-scroll");
+        }
+    }
+
+    private async Task InitializeAsync()
+    {
+        _statusMessage = "Checking connection...";
+        StateHasChanged();
+
+        try
+        {
+            if (await VoiceService.CheckHealthAsync())
+            {
+                _statusMessage = "Connected - Ready to chat";
+                AddMessage("assistant", "Hello! I'm Pam, your voice assistant. How can I help you today?");
+            }
+            else
+            {
+                _statusMessage = "Warning: API service not available";
+            }
+        }
+        catch (Exception)
+        {
+            _statusMessage = "Warning: Could not connect to API service";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+            await SendMessageAsync();
+    }
+
+    private async Task SendMessageAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_messageText) || _isBusy)
+            return;
+
+        var userMessage = _messageText.Trim();
+        _messageText = string.Empty;
+
+        try
+        {
+            _isBusy = true;
+            _statusMessage = "Sending message...";
+            AddMessage("user", userMessage);
+
+            var context = _messages.TakeLast(ContextWindowMessageCount).ToList();
+            var response = await VoiceService.GetChatCompletionAsync(context);
+
+            AddMessage("assistant", response.Trim());
+            _statusMessage = "Ready";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Error: {ex.Message}";
+            AddMessage("assistant", $"Sorry, I encountered an error: {ex.Message}");
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task ToggleRecordingAsync()
+    {
+        if (_isBusy || _isStartingRecording || _audioModule is null)
+            return;
+
+        try
+        {
+            if (_isRecording)
+            {
+                await _audioModule.InvokeVoidAsync("stopRecording");
+                _statusMessage = "Processing speech...";
+                return;
+            }
+
+            _isStartingRecording = true;
+            _statusMessage = "Requesting microphone access...";
+            StateHasChanged();
+
+            StartRecordingResult result;
+            try
+            {
+                result = await _audioModule.InvokeAsync<StartRecordingResult>("startRecording", _selfRef);
+            }
+            finally
+            {
+                _isStartingRecording = false;
+            }
+
+            if (!result.Ok)
+            {
+                _statusMessage = result.Error ?? "Could not start recording";
+                _isRecording = false;
+                return;
+            }
+
+            _isRecording = true;
+            _statusMessage = "Recording... Will auto-stop after 3s of silence";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Recording error: {ex.Message}";
+            _isRecording = false;
+            _isStartingRecording = false;
+        }
+    }
+
+    /// <summary>Called from pam-audio.js once the microphone stream has been captured.</summary>
+    [JSInvokable]
+    public async Task OnRecordingCompleted(string base64, string contentType, string fileName)
+    {
+        _isRecording = false;
+
+        if (string.IsNullOrEmpty(base64))
+        {
+            _statusMessage = "No audio recorded";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _isBusy = true;
+        _statusMessage = "Processing speech...";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var audioData = Convert.FromBase64String(base64);
+            var response = await VoiceService.ProcessVoiceAsync(audioData, fileName, contentType);
+
+            if (string.IsNullOrWhiteSpace(response.Transcript))
+            {
+                _statusMessage = "I didn't catch that — please try again.";
+                return;
+            }
+
+            AddMessage("user", response.Transcript);
+            AddMessage("assistant", response.AssistantText);
+            _statusMessage = "Ready";
+
+            if (!string.IsNullOrEmpty(response.AudioBase64))
+            {
+                _isBusy = false;
+                await InvokeAsync(StateHasChanged);
+                await PlayAudioAsync(response.AudioBase64, response.AudioFormat);
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Speech processing error: {ex.Message}";
+        }
+        finally
+        {
+            _isBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task PlayAudioAsync(string audioBase64, string format)
+    {
+        if (_audioModule is null)
+            return;
+
+        try
+        {
+            var mimeType = string.IsNullOrWhiteSpace(format) ? "audio/wav" : $"audio/{format}";
+            await _audioModule.InvokeVoidAsync("playAudio", audioBase64, mimeType);
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Audio playback failed: {ex.Message}";
+        }
+    }
+
+    private void AddMessage(string role, string content)
+    {
+        _messages.Add(new ChatMessage { Role = role, Content = content, Timestamp = DateTime.Now });
+        _shouldScroll = true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_audioModule is not null)
+        {
+            try
+            {
+                await _audioModule.InvokeVoidAsync("stopRecording");
+                await _audioModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { }
+            catch (ObjectDisposedException) { }
+        }
+
+        _selfRef?.Dispose();
+    }
+}

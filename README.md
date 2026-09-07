@@ -19,6 +19,7 @@ usually the first lab exercise.
 |---|---|
 | `PamPocApi/` | ASP.NET Core 9 Web API — the "voice gateway". Orchestrates STT → LLM → TTS. |
 | `PamPocClient/` | .NET MAUI app (**macOS / Mac Catalyst only**) — chat UI, mic capture, audio playback. |
+| `PamPocWebClient/` | Blazor Server app — the same experience in a browser. |
 | `setup_and_start_voice_stack.sh` | One-shot macOS installer: installs and starts Ollama, whisper.cpp and Piper. |
 | `sample.wav` | Canned audio clip for testing the pipeline without a microphone. |
 
@@ -116,12 +117,24 @@ Smoke-test the full pipeline with the bundled clip:
 curl -F "file=@sample.wav" http://localhost:5269/api/voice/json | jq '.transcript, .assistantText, .timingsMs'
 ```
 
-### 3. Run the client
+### 3. Run a client
+
+**Mac app:**
 
 ```bash
 cd PamPocClient
 dotnet build -t:Run -f net9.0-maccatalyst
 ```
+
+**Browser:**
+
+```bash
+cd PamPocWebClient
+dotnet run
+```
+
+Serves on <http://localhost:5021> and opens your browser. Same flow as the Mac app —
+see `PamPocWebClient/README.md`.
 
 Tap **🎙️** and speak. Recording stops automatically after 3 seconds of silence (or 20 seconds total), the
 clip is sent to `/api/voice/json`, and Pam's reply is shown in the transcript and played aloud. You can also
@@ -180,8 +193,9 @@ PAMPOC__DEFAULT_LLM_MODEL=llama3.2 dotnet run --project PamPocApi
 Validation is strict: `http` mode requires `TtsUrl`, `cli` mode requires `TtsVoicePath`, and the app refuses
 to start otherwise.
 
-The client's backend address is currently a constant — `BaseUrl` in
+The Mac client's backend address is a constant — `BaseUrl` in
 `PamPocClient/PamPocClient/Services/VoiceService.cs`. Change it there to point at a different gateway.
+The web client reads it from the `ApiBaseUrl` setting, so `ApiBaseUrl=http://host:port dotnet run` is enough.
 
 ---
 

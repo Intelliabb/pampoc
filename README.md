@@ -103,61 +103,7 @@ inja`. This is needed if the C++ build tools don't work.
 
 ---
 
-## Quick Start — Automated Setup (macOS Only)
-
-The `setup_and_start_voice_stack.sh` script automates everything on macOS with Apple Silicon.
-
-> ⚠️ **Intel Mac users:** Skip the script. Follow the [Manual Setup](#manual-setup) section instead — Homebrew builds fail on Intel. Use official binaries.
-
-### 1. Provision the Local Model Stack
-
-```bash
-./setup_and_start_voice_stack.sh
-```
-
-This will:
-- ✅ Start Ollama and pull `mistral:instruct` (or override: `OLLAMA_MODEL=mistral:instruct ./setup_and_start_voice_stack.sh`)
-- ✅ Clone + build whisper.cpp and launch `whisper-server` on port 8001
-- ✅ Create Python venv, install `piper-tts` (http and CLI), download voice models, launch Piper HTTP server on port 8002
-- ✅ No configuration editing required — `appsettings.Development.json` points at the installed locations, but verify if errors occur
-
-Logs: `~/Library/Logs/voice-stack/`  
-PIDs: `~/.run/voice-stack/`
-
-> If your repo is not at `~/Projects/pampoc`, edit `PROJ_ROOT` in the script.
-
-### 2. Run the API
-
-```bash
-cd PamPocApi
-dotnet run
-```
-
-API listens on **http://localhost:5269**. Verify:
-
-```bash
-curl http://localhost:5269/api/health
-# { "ok": true, "services": { "llm": "up", "stt": "up", "tts": "http" } }
-```
-
-Smoke-test with the bundled audio:
-
-```bash
-curl -F "file=@sample.wav" http://localhost:5269/api/voice/json | jq '.transcript, .assistantText, .timingsMs'
-```
-
-### 3. Run the Web Client
-
-```bash
-cd PamPocWebClient
-dotnet run
-```
-
-Opens **http://localhost:5021** in your browser. Tap **🎙️** and speak. Recording stops after 3 seconds of silence or 20 seconds total.
-
----
-
-## Manual Setup (Intel Mac, Windows, Linux)
+## Setup
 
 Follow these sections in order to manually install and start each service.
 

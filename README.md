@@ -1,15 +1,10 @@
 # PamPoc — A Fully Local Voice AI Assistant
 
-**PamPoc** is a proof-of-concept, end-to-end **voice assistant** ("Pam") that runs entirely on your own
-machine — no cloud API keys, no data leaving the laptop. You talk to a native macOS app, and Pam talks back.
+**PamPoc** is a proof-of-concept, end-to-end **voice assistant** ("Pam") that runs entirely on your own machine — no cloud API keys, no data leaving your device. You talk to a browser app, and Pam talks back.
 
-It is built and maintained as a **workshop / training codebase**: the pipeline is small enough to read in an
-hour, but real enough to demonstrate speech-to-text, LLM inference, text-to-speech, prompt design, .NET
-service composition, and MAUI client development against a live backend.
+It is built and maintained as a **workshop / training codebase**: the pipeline is small enough to read in an hour, but real enough to demonstrate speech-to-text, LLM inference, text-to-speech, prompt design, .NET service composition, and web client development against a live backend.
 
-In the sample scenario, Pam is a **front-desk scheduling assistant for a family health clinic** — the system
-prompt in `PamPocApi/PamPocApi/Services/PromptService.cs` is what gives her that persona, and swapping it is
-usually the first lab exercise.
+In the sample scenario, Pam is a **front-desk scheduling assistant for a family health clinic** — the system prompt in `PamPocApi/PamPocApi/Services/PromptService.cs` is what gives her that persona, and swapping it is usually the first lab exercise.
 
 ---
 
@@ -18,13 +13,12 @@ usually the first lab exercise.
 | Path | What it is |
 |---|---|
 | `PamPocApi/` | ASP.NET Core 9 Web API — the "voice gateway". Orchestrates STT → LLM → TTS. |
-| `PamPocClient/` | .NET MAUI app (**macOS / Mac Catalyst only**) — chat UI, mic capture, audio playback. |
-| `PamPocWebClient/` | Blazor Server app — the same experience in a browser. |
-| `setup_and_start_voice_stack.sh` | One-shot macOS installer: installs and starts Ollama, whisper.cpp and Piper. |
-| `sample.wav` | Canned audio clip for testing the pipeline without a microphone. |
+| `PamPocWebClient/` | Blazor Server web app — chat UI, mic capture, audio playback. Runs in browser. |
+| `PamPocClient/` | .NET MAUI app (macOS only) — native app alternative to web client. |
+| `setup_and_start_voice_stack.sh` | Automated setup for macOS: installs/starts Ollama, whisper.cpp, Piper. |
+| `sample.wav` | Test audio clip for testing the pipeline without a microphone. |
 
-Everything else (the models, the STT server, the TTS binary) lives outside the repo and is provisioned by
-the setup script.
+Everything else (the models, the STT server, the TTS binary) lives outside the repo and is provisioned by the setup script or installed manually.
 
 ---
 
@@ -32,71 +26,89 @@ the setup script.
 
 ```
 ┌──────────────────────────┐
-│  PamPocClient (MAUI)     │   Mac Catalyst app
-│  • record mic (AVFoundation, 16 kHz mono,
-│    auto-stops after 3 s of silence)
+│  PamPocWebClient         │   Web app (browser)
+│  or PamPocClient (MAUI)  │   or native Mac app
+│                          │
+│  • record/upload audio
 │  • chat transcript UI
-│  • play back Pam's reply
+│  • play Pam's reply
 └────────────┬─────────────┘
              │  multipart/form-data  POST /api/voice/json
              ▼
-┌──────────────────────────┐
-│  PamPocApi (ASP.NET 9)   │   http://localhost:5269
-│                          │
-│  1. ffmpeg → 16 kHz mono 16-bit PCM WAV
-│  2. STT  ──────────────────────────────►  whisper.cpp server   :8001
-│  3. LLM  ──────────────────────────────►  Ollama (OpenAI API)  :11434
-│  4. TTS  ──────────────────────────────►  Piper HTTP server    :5000
-│                          │
-│  returns { transcript, assistantText, audioBase64, usage, timingsMs }
-└──────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  PamPocApi (ASP.NET 9)                       │  http://localhost:5269
+│                                              │
+│  1. ffmpeg → 16 kHz mono 16-bit PCM WAV    │
+│  2. STT  ──────────────────────────────┐    │
+│  3. LLM  ──────────────────────────────┼─►  whisper.cpp server   :8001
+│  4. TTS  ──────────────────────────────┼─►  Ollama (OpenAI API)  :11434
+│                                        └─►  Piper HTTP server    :8002
+│                                              │
+│  Returns: { transcript, assistantText,      │
+│             audioBase64, usage, timingsMs }  │
+└──────────────────────────────────────────────┘
 ```
 
 Three local model services back the gateway:
 
 | Stage | Engine | Default | Endpoint |
 |---|---|---|---|
-| Speech-to-text | [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server | `ggml-small.en` | `http://127.0.0.1:8001/v1/audio/transcriptions` |
-| LLM | [Ollama](https://ollama.com) (OpenAI-compatible) | `mistral:instruct` | `http://localhost:11434/v1/chat/completions` |
-| Text-to-speech | [Piper](https://github.com/OHF-voice/piper1-gpl) `piper.http_server` | `en_US-amy-medium` | `http://127.0.0.1:5000/` |
+| **Speech-to-text** | [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server | `ggml-small.en` | `http://127.0.0.1:8001/inference` |
+| **LLM** | [Ollama](https://ollama.com) (OpenAI-compatible) | `gemma:2b` or `mistral:instruct` | `http://localhost:11434/v1/chat/completions` |
+| **Text-to-speech** | [Piper](https://github.com/OHF-voice/piper1-gpl) HTTP server | `en_US-amy-medium` | `http://127.0.0.1:8002/synthesize` |
 
-Because whisper.cpp and Ollama both expose **OpenAI-compatible** routes, the gateway code is a good starting
-point for pointing the same app at a hosted provider — another common workshop exercise.
+All three services expose **HTTP REST endpoints**, making them interchangeable with hosted providers — another common workshop exercise.
 
 ---
 
 ## Prerequisites
 
-- **macOS on Apple Silicon** (the client is Mac Catalyst; the setup script is Homebrew-based)
-- [Homebrew](https://brew.sh)
-- [.NET 9 SDK](https://dotnet.microsoft.com/download) + MAUI workload — `dotnet workload install maui`
-- Xcode Command Line Tools
-- ~5 GB free disk for models (Whisper small.en ≈ 466 MB, `mistral:instruct` ≈ 4 GB, Piper voice ≈ 60 MB)
+### System Requirements
 
-The setup script installs `git`, `cmake`, `ffmpeg`, `ollama` and `python@3.11` for you. `ffmpeg` is **required
-at runtime** — the API shells out to it to normalize incoming audio.
+- **macOS** (Apple Silicon or Intel x86_64) or **Windows** or **Linux**
+- [.NET 9 Runtime or SDK](https://dotnet.microsoft.com/download)
+- Microphone or test audio file (`sample.wav` included)
+- ~5 GB free disk space for models:
+  - Whisper small.en ≈ 466 MB
+  - LLM (gemma:2b) ≈ 1.6 GB
+  - Piper voice ≈ 65 MB
+
+### macOS & Linux Prerequisites
+
+- [Homebrew](https://brew.sh)
+- Git, CMake, ffmpeg, Python 3.11
+
+### Windows Prerequisites
+
+- Git
+- CMake
+- ffmpeg (download from [ffmpeg.org](https://ffmpeg.org/download.html) or `choco install ffmpeg`)
+- Python 3.11 (from [python.org](https://www.python.org/downloads))
 
 ---
 
-## Quick start
+## Quick Start — Automated Setup (macOS Only)
 
-### 1. Provision the local model stack
+The `setup_and_start_voice_stack.sh` script automates everything on macOS with Apple Silicon.
+
+> ⚠️ **Intel Mac users:** Skip the script. Follow the [Manual Setup](#manual-setup) section instead — Homebrew builds fail on Intel. Use official binaries.
+
+### 1. Provision the Local Model Stack
 
 ```bash
 ./setup_and_start_voice_stack.sh
 ```
 
 This will:
-- start Ollama and pull `mistral:instruct` (override with `OLLAMA_MODEL=llama3.2 ./setup_and_start_voice_stack.sh`)
-- clone + build whisper.cpp into `~/Library/tools/whisper.cpp` and launch `whisper-server` on port 8001
-- create a Python venv at `~/Library/tools/venvs/piper`, install `piper-tts[http]`, download the `en_US-amy-medium`
-  voice and launch Piper's own `piper.http_server` on port 5000
-No configuration editing is required — `appsettings.Development.json` already points at the locations the
-script installs into, using `~/…` paths that are expanded at startup.
+- ✅ Start Ollama and pull `gemma:2b` (or override: `OLLAMA_MODEL=mistral:instruct ./setup_and_start_voice_stack.sh`)
+- ✅ Clone + build whisper.cpp and launch `whisper-server` on port 8001
+- ✅ Create Python venv, install `piper-tts[http]`, download voice, launch Piper HTTP server on port 8002
+- ✅ No configuration editing required — `appsettings.Development.json` points at the installed locations
 
-Logs land in `~/Library/Logs/voice-stack/`, PIDs in `~/.run/voice-stack/`.
+Logs: `~/Library/Logs/voice-stack/`  
+PIDs: `~/.run/voice-stack/`
 
-> ⚠️ The script assumes the repo lives at `~/Projects/pampoc`. Edit `PROJ_ROOT` at the top if yours doesn't.
+> If your repo is not at `~/Projects/pampoc`, edit `PROJ_ROOT` in the script.
 
 ### 2. Run the API
 
@@ -105,130 +117,397 @@ cd PamPocApi
 dotnet run --project PamPocApi --launch-profile http
 ```
 
-The API listens on **http://localhost:5269**. Verify the whole stack is reachable:
+API listens on **http://localhost:5269**. Verify:
 
 ```bash
 curl http://localhost:5269/api/health
 # { "ok": true, "services": { "llm": "up", "stt": "up", "tts": "http" } }
 ```
 
-Smoke-test the full pipeline with the bundled clip:
+Smoke-test with the bundled audio:
 
 ```bash
 curl -F "file=@sample.wav" http://localhost:5269/api/voice/json | jq '.transcript, .assistantText, .timingsMs'
 ```
 
-### 3. Run a client
-
-**Mac app:**
-
-```bash
-cd PamPocClient
-dotnet build -t:Run -f net9.0-maccatalyst
-```
-
-**Browser:**
+### 3. Run the Web Client
 
 ```bash
 cd PamPocWebClient
 dotnet run
 ```
 
-Serves on <http://localhost:5021> and opens your browser. Same flow as the Mac app —
-see `PamPocWebClient/README.md`.
-
-Tap **🎙️** and speak. Recording stops automatically after 3 seconds of silence (or 20 seconds total), the
-clip is sent to `/api/voice/json`, and Pam's reply is shown in the transcript and played aloud. You can also
-type into the entry box to hit the text-only `/api/chat` route.
-
-macOS will prompt for microphone access on first use; if you deny it, re-enable under
-**System Settings → Privacy & Security → Microphone**.
+Opens **http://localhost:5021** in your browser. Tap **🎙️** and speak. Recording stops after 3 seconds of silence or 20 seconds total.
 
 ---
 
-## API reference
+## Manual Setup (Intel Mac, Windows, Linux)
 
-| Method | Route | Body | Returns |
-|---|---|---|---|
-| `POST` | `/api/voice` | multipart: `file`, optional `language`, `llm_model`, `system_prompt`, `temperature`, `max_tokens` | `audio/wav` (spoken reply) |
-| `POST` | `/api/voice/json` | multipart: `file`, optional `language`, `llm_model`, `system_prompt` | JSON: transcript, assistant text, base64 WAV, token usage, per-stage timings |
-| `POST` | `/api/chat` | JSON: `{ model, messages[], temperature, maxTokens }` | `{ text, usage, provider }` |
-| `POST` | `/api/speech/stt` | multipart: `file`, optional `language` | `{ text, language }` |
-| `POST` | `/api/speech/tts` | JSON: `{ text, voice }` | `audio/wav` |
-| `GET` | `/api/health` | — | upstream reachability for LLM / STT / TTS |
-| `GET` | `/health` | — | ASP.NET Core health check |
+Follow these sections in order to manually install and start each service.
 
-OpenAPI is exposed at `/openapi/v1.json` in the Development environment.
+### 1. Install Ollama
 
-`/api/voice/json` is the interesting one for teaching: it returns `timingsMs` broken out per stage
-(`stt`, `llm`, `tts`, `total`), which makes latency budgets concrete during a session.
+**macOS (direct download, not Homebrew):**
+
+```bash
+curl -L https://ollama.ai/download/Ollama-darwin.zip -o /tmp/Ollama.zip
+unzip /tmp/Ollama.zip -d /Applications/
+rm /tmp/Ollama.zip
+export PATH="/Applications/Ollama.app/Contents/MacOS:$PATH"
+ollama --version  # verify
+```
+
+**Windows:**
+
+Download from [ollama.ai/download](https://ollama.ai/download) and run installer.
+
+**Linux:**
+
+Follow instructions on [ollama.ai/download](https://ollama.ai/download).
+
+**Start Ollama:**
+
+```bash
+ollama serve
+```
+
+**Download LLM model (in a new terminal):**
+
+```bash
+ollama pull gemma:2b  # or: mistral:instruct, llama3, etc.
+ollama list           # verify
+```
+
+---
+
+### 2. Install Whisper.cpp (Speech-to-Text)
+
+**Prerequisites:**
+
+```bash
+# macOS
+brew install cmake git
+
+# Windows: Download CMake from cmake.org, add to PATH
+
+# Linux
+sudo apt update && sudo apt install cmake git build-essential
+```
+
+**Clone and build:**
+
+```bash
+cd ~/Library/tools  # or your preferred tools directory
+git clone https://github.com/ggml-org/whisper.cpp
+cd whisper.cpp
+cmake -B build
+cmake --build build -j
+```
+
+**Download model:**
+
+```bash
+sh ./models/download-ggml-model.sh small.en
+# File: models/ggml-small.en.bin (~466 MB)
+```
+
+**Start server:**
+
+```bash
+# Detect CPU count
+THREADS=$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)
+
+./build/bin/whisper-server \
+  --model models/ggml-small.en.bin \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --inference-path "/inference" \
+  --threads $THREADS \
+  --processors 1
+```
+
+**Test with cURL:**
+
+```bash
+curl http://127.0.0.1:8001/inference \
+  -F file="@sample.wav" \
+  -F response_format="json"
+# { "result": "transcribed text..." }
+```
+
+---
+
+### 3. Install Piper (Text-to-Speech)
+
+**Prerequisites:**
+
+```bash
+# macOS
+brew install python@3.11
+
+# Windows: Download from python.org, check "Add to PATH"
+
+# Linux
+sudo apt install python3.11 python3.11-venv
+```
+
+**Create venv and install:**
+
+```bash
+# macOS/Linux
+python3.11 -m venv ~/Library/tools/venvs/piper
+source ~/Library/tools/venvs/piper/bin/activate
+
+# Windows
+python -m venv C:\Users\YourUsername\AppData\Local\piper-venv
+C:\Users\YourUsername\AppData\Local\piper-venv\Scripts\activate
+
+# Install Piper with HTTP support
+pip install --upgrade pip setuptools
+pip install ninja cmake scikit-build-core
+pip install 'piper-tts[http]'
+```
+
+**Download voice model:**
+
+```bash
+mkdir -p ~/Library/models/piper
+cd ~/Library/models/piper
+
+curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx \
+  -o en_US-amy-medium.onnx
+
+curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json \
+  -o en_US-amy-medium.onnx.json
+```
+
+**Start server:**
+
+```bash
+# macOS/Linux (venv activated)
+python3 -m piper.http_server \
+  --model ~/Library/models/piper/en_US-amy-medium.onnx \
+  --port 8002
+
+# Windows (venv activated)
+python -m piper.http_server ^
+  --model C:\Users\YourUsername\AppData\Local\piper\en_US-amy-medium.onnx ^
+  --port 8002
+```
+
+**Test with cURL:**
+
+```bash
+curl -X POST http://localhost:8002/synthesize \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Hello world"}' \
+  -o output.wav
+
+# Listen
+open output.wav  # macOS
+start output.wav # Windows
+```
+
+---
+
+### 4. Add Tools to PATH (If Not Using Script)
+
+Edit your shell config to include tools directory:
+
+**macOS (zsh):**
+
+```bash
+nano ~/.zshrc
+# Add:
+export PATH="/usr/local/bin:/Applications/Ollama.app/Contents/MacOS:$HOME/Library/tools:$PATH"
+# Save: Ctrl+O, Enter, Ctrl+X
+
+source ~/.zshrc
+```
+
+**Windows (PowerShell):**
+
+Add to System Environment Variables:
+- `Path: C:\Program Files\ollama`
+- `Path: C:\Program Files\ffmpeg\bin`
 
 ---
 
 ## Configuration
 
-All settings live under the `ServiceConfiguration` section and are bound + validated at startup
-(`Configuration/ServiceConfiguration.cs`). `appsettings.Development.json` is the single source of
-configuration for local runs.
+All settings live in `appsettings.Development.json` under `ServiceConfiguration`:
+
+```json
+{
+  "ServiceConfiguration": {
+    "SttUrl": "http://127.0.0.1:8001/inference",
+    "LlmUrl": "http://localhost:11434/v1/chat/completions",
+    "DefaultLlmModel": "gemma:2b",
+    "TtsMode": "http",
+    "TtsUrl": "http://127.0.0.1:8002/synthesize"
+  }
+}
+```
 
 | Key | Purpose |
 |---|---|
-| `SttUrl` | whisper.cpp transcription endpoint |
-| `LlmUrl` | OpenAI-compatible chat completions endpoint |
-| `DefaultLlmModel` | Model name used when a request doesn't specify one |
-| `TtsMode` | `http` (POST to `piper.http_server`, the default) or `cli` (spawn the Piper binary per request) |
-| `PiperBin` | Path to the Piper executable (`cli` mode) |
-| `TtsVoicePath` | Path to the `.onnx` voice (`cli` mode) |
-| `TtsUrl` | Piper HTTP endpoint (`http` mode) |
+| `SttUrl` | Whisper.cpp inference endpoint |
+| `LlmUrl` | Ollama OpenAI-compatible chat endpoint |
+| `DefaultLlmModel` | Model name (can be overridden per request) |
+| `TtsMode` | `http` (Piper HTTP server) or `cli` (Piper CLI binary) |
+| `TtsUrl` | Piper HTTP endpoint (only used if `TtsMode` is `http`) |
+| `PiperBin` | Path to Piper binary (only used if `TtsMode` is `cli`) |
+| `TtsVoicePath` | Path to Piper voice model (only used if `TtsMode` is `cli`) |
 
-`PiperBin` and `TtsVoicePath` may be written with a leading `~/`, which is expanded to the current user's
-home directory at startup (`ConfigurationExtensions.ExpandHome`). That's what lets one committed config work
-on every attendee's machine — the setup script installs to the same `~/Library/…` locations for everyone.
+Paths with `~/` are expanded to user home directory at startup.
 
-Each key can be overridden with a `PAMPOC__`-prefixed environment variable, e.g.:
+Override any setting with `PAMPOC__`-prefixed env var:
 
 ```bash
-PAMPOC__DEFAULT_LLM_MODEL=llama3.2 dotnet run --project PamPocApi
+PAMPOC__DEFAULT_LLM_MODEL=mistral:instruct dotnet run --project PamPocApi
 ```
 
-Validation is strict: `http` mode requires `TtsUrl`, `cli` mode requires `TtsVoicePath`, and the app refuses
-to start otherwise.
+---
 
-The Mac client's backend address is a constant — `BaseUrl` in
-`PamPocClient/PamPocClient/Services/VoiceService.cs`. Change it there to point at a different gateway.
-The web client reads it from the `ApiBaseUrl` setting, so `ApiBaseUrl=http://host:port dotnet run` is enough.
+## API Reference
+
+| Method | Route | Body | Returns |
+|---|---|---|---|
+| `POST` | `/api/voice/json` | multipart: `file`, optional `language`, `llm_model`, `system_prompt`, `temperature`, `max_tokens` | JSON: transcript, assistant text, base64 WAV, token usage, timings |
+| `POST` | `/api/voice` | multipart: `file`, ... | `audio/wav` (spoken reply only) |
+| `POST` | `/api/chat` | JSON: `{ model, messages[], temperature, maxTokens }` | `{ text, usage }` |
+| `POST` | `/api/speech/stt` | multipart: `file`, optional `language` | `{ text, language }` |
+| `POST` | `/api/speech/tts` | JSON: `{ text, voice }` | `audio/wav` |
+| `GET` | `/api/health` | — | upstream reachability (llm, stt, tts) |
+| `GET` | `/health` | — | ASP.NET Core health check |
+
+`/api/voice/json` returns `timingsMs` per stage (`stt`, `llm`, `tts`, `total`) — great for latency discussions in a workshop setting.
+
+OpenAPI: `/openapi/v1.json` (Development environment only)
 
 ---
 
 ## Troubleshooting
 
-**`whisper-server` isn't running.** `curl http://127.0.0.1:8001` — if it's down, check
-`~/Library/Logs/voice-stack/whisper-server.log`. Re-running the setup script restarts it.
+### General Issues
 
-**Ollama unavailable.** `brew services restart ollama`, then `curl http://localhost:11434/api/tags`.
+**`ffmpeg: command not found`**
 
-**`Audio conversion failed`.** `ffmpeg` isn't on the API process's `PATH`. Install with `brew install ffmpeg`
-and restart the API from a shell where `which ffmpeg` succeeds.
+`ffmpeg` is required at runtime to normalize incoming audio. Install:
 
-**TTS returns a 502.** Check that Piper's server is up with `curl http://127.0.0.1:5000/voices`, and read
-`~/Library/Logs/voice-stack/piper-http.log` if it isn't. Confirm the voice file exists at
-`~/Library/models/piper/en_US-amy-medium.onnx`. Re-running the setup script restarts the server and
-restores the voice. In `cli` mode instead, confirm `~/Library/tools/venvs/piper/bin/piper` is executable.
+```bash
+# macOS
+brew install ffmpeg
 
-**Port 5269 is already in use.** An API instance is still running from an earlier session. Find it with
-`lsof -nP -iTCP:5269 -sTCP:LISTEN` and kill that PID, or run on another port with
-`ASPNETCORE_URLS=http://127.0.0.1:5270 dotnet run --project PamPocApi --no-launch-profile`.
+# Windows
+# Download from ffmpeg.org or: choco install ffmpeg
 
-**Env vars aren't taking effect.** Only the seven `PAMPOC__`-prefixed names are read
-(`ConfigurationExtensions.cs`). Unprefixed names like `STT_URL` are ignored — including the block in
-`launchSettings.json:11-17`, which is inert and shadowed by `appsettings.Development.json`.
+# Linux
+sudo apt install ffmpeg
+```
 
-**The client's health indicator never goes green.** `CheckHealthAsync` looks for `status: "healthy"`, but
-`/api/health` returns `{ ok, services }`. Reconciling the two is a nice five-minute warm-up task.
+Add to PATH if installed to non-standard location.
+
+**Service health check fails**
+
+Verify each service individually:
+
+```bash
+# Ollama
+curl http://localhost:11434/api/tags
+
+# Whisper
+curl http://127.0.0.1:8001
+
+# Piper
+curl http://127.0.0.1:8002/voices
+```
+
+### Intel Mac Specific
+
+**⚠️ Setup script fails with Homebrew errors**
+
+The automated script fails on Intel Macs because Homebrew tries to compile llama.cpp. **Use manual setup instead** (see [Manual Setup](#manual-setup) section above).
+
+**Quick checklist:**
+
+1. ✅ Install Ollama directly (not via Homebrew) from [ollama.ai/download](https://ollama.ai/download)
+2. ✅ Install Flask: `pip install flask`
+3. ✅ Install Ninja: `brew install ninja`
+4. ✅ Install CMake: `brew install cmake`
+5. ✅ Ensure all tools are in PATH (see [Add Tools to PATH](#add-tools-to-path-if-not-using-script))
+6. ✅ Run services manually in separate terminals
+
+### Windows Specific
+
+**Python not found in venv**
+
+Make sure to activate the venv before running Piper:
+
+```bash
+C:\path\to\piper-venv\Scripts\activate
+python -m piper.http_server ...
+```
+
+**Port already in use**
+
+Change ports:
+
+```bash
+set ASPNETCORE_URLS=http://127.0.0.1:5270
+dotnet run --project PamPocApi --no-launch-profile
+```
+
+### API Issues
+
+**"Audio conversion failed: ffmpeg not found"**
+
+API failed to call `ffmpeg`. Verify it's on PATH and restart the API from a shell where `which ffmpeg` succeeds.
+
+**Piper returns 502**
+
+Check Piper server is running:
+
+```bash
+curl http://127.0.0.1:8002/voices
+```
+
+Check logs for errors. Re-run Piper server.
+
+**Ollama unavailable**
+
+```bash
+# Restart Ollama
+ollama serve
+```
+
+**TTS times out**
+
+Piper model may still be loading. Wait 10 seconds and retry. Logs:
+
+```bash
+tail -f ~/Library/Logs/voice-stack/piper-http.log  # macOS
+```
+
+---
+
+## Workshop Notes
+
+This codebase is designed for hands-on workshops:
+
+1. **Setup time:** ~15 min (running the setup script)
+2. **Understanding the stack:** ~30 min (reading the API and client code)
+3. **Lab exercises:**
+   - Change the system prompt (clinic → pizza shop, etc.)
+   - Swap LLM models (`ollama pull llama3` then update config)
+   - Add custom voice model (download different Piper voice)
+   - Modify timings/latency display
+   - Connect to hosted services (Azure OpenAI, etc.)
+
+The pipeline is intentionally small and readable — no streaming, no persistence, no auth — so attendees can add these features as exercises.
 
 ---
 
 ## Status
 
-This is a **proof of concept**, not production code. No auth, no persistence, no streaming, no test suite,
-stateless turns, and macOS-only client. That's intentional — the gaps are the curriculum.
+**Proof of concept.** No production-ready features (no auth, no persistence, no streaming, stateless turns). Gaps are intentional — they're the curriculum.

@@ -29,9 +29,9 @@ Everything else (the models, the STT server, the TTS binary) lives outside the r
 │  PamPocWebClient         │   Web app (browser)
 │  or PamPocClient (MAUI)  │   or native Mac app
 │                          │
-│  • record/upload audio
-│  • chat transcript UI
-│  • play Pam's reply
+│  • record/upload audio   │
+│  • chat transcript UI    │
+│  • play Pam's reply      │
 └────────────┬─────────────┘
              │  multipart/form-data  POST /api/voice/json
              ▼
@@ -86,10 +86,20 @@ All three services expose **HTTP REST endpoints**, making them interchangeable w
 
 ### Windows Prerequisites
 
-- Git
-- CMake
-- ffmpeg (download from [ffmpeg.org](https://ffmpeg.org/download.html) or `choco install ffmpeg`)
-- Python 3.11 (from [python.org](https://www.python.org/downloads))
+⚠️ **IMPORTANT: Install all tools in `C:\Tools\` (no spaces in path)**
+
+Batch scripts like whisper's model downloader fail with spaces in paths. Use `C:\Tools\` instead of `Program Files`.
+
+- **Git** - Install to `C:\Tools\git`
+- **CMake** - Extract to `C:\Tools\cmake`
+- **Visual C++ Build Tools** (download from [Visual Studio](https://visualstudio.microsoft.com/downloads/))
+  - Required for compiling C/C++ projects like whisper.cpp
+  - Select "Desktop development with C++" workload during installation
+  - Alternatively, use Ninja: `choco install ninja`
+- **ffmpeg** - Download binary from [ffmpeg.org](https://ffmpeg.org/download.html) and extract to `C:\Toolsfmpeg`
+- **Python 3.11** - Install from [python.org](https://www.python.org/downloads), add to PATH
+- **Ninja** (optional) - Download from [ninja-build.org](https://ninja-build.org/) and extract to `C:\Tools
+inja`. This is needed if the C++ build tools don't work.
 
 ---
 
@@ -106,10 +116,10 @@ The `setup_and_start_voice_stack.sh` script automates everything on macOS with A
 ```
 
 This will:
-- ✅ Start Ollama and pull `gemma:2b` (or override: `OLLAMA_MODEL=mistral:instruct ./setup_and_start_voice_stack.sh`)
+- ✅ Start Ollama and pull `mistral:instruct` (or override: `OLLAMA_MODEL=mistral:instruct ./setup_and_start_voice_stack.sh`)
 - ✅ Clone + build whisper.cpp and launch `whisper-server` on port 8001
-- ✅ Create Python venv, install `piper-tts[http]`, download voice, launch Piper HTTP server on port 8002
-- ✅ No configuration editing required — `appsettings.Development.json` points at the installed locations
+- ✅ Create Python venv, install `piper-tts` (http and CLI), download voice models, launch Piper HTTP server on port 8002
+- ✅ No configuration editing required — `appsettings.Development.json` points at the installed locations, but verify if errors occur
 
 Logs: `~/Library/Logs/voice-stack/`  
 PIDs: `~/.run/voice-stack/`
@@ -120,7 +130,7 @@ PIDs: `~/.run/voice-stack/`
 
 ```bash
 cd PamPocApi
-dotnet run --project PamPocApi --launch-profile http
+dotnet run
 ```
 
 API listens on **http://localhost:5269**. Verify:
@@ -180,7 +190,7 @@ ollama serve
 **Download LLM model (in a new terminal):**
 
 ```bash
-ollama pull gemma:2b  # or: mistral:instruct, llama3, etc.
+ollama pull mistral:instruct  # or: gemma:2b, llama3, etc.
 ollama list           # verify
 ```
 
@@ -194,13 +204,27 @@ ollama list           # verify
 # macOS
 brew install cmake git
 
-# Windows: Download CMake from cmake.org, add to PATH
+# Windows: CMake is part of Visual C++ Build Tools. If you don't have that installed, you can download CMake from cmake.org, add to PATH
 
 # Linux
 sudo apt update && sudo apt install cmake git build-essential
 ```
 
 **Clone and build:**
+
+**Windows (Command Prompt as Administrator):**
+
+```cmd
+REM Install to C:\Tools to avoid spaces in path
+mkdir C:\Tools
+cd C:\Tools
+git clone https://github.com/ggml-org/whisper.cpp
+cd whisper.cpp
+cmake -B build
+cmake --build build -j --config Release
+```
+
+**macOS/Linux:**
 
 ```bash
 cd ~/Library/tools  # or your preferred tools directory
@@ -210,26 +234,73 @@ cmake -B build
 cmake --build build -j
 ```
 
+**Windows troubleshooting:**
+
+If you get "CMAKE_C_COMPILER not set" error:
+
+1. **Use Developer Command Prompt (CRITICAL):**
+   - Search Windows for **"Developer Command Prompt for VS 2022"**
+   - **Run as Administrator**
+   - Navigate to whisper.cpp directory
+   - Try building again:
+     ```cmd
+     cmake -B build
+     cmake --build build -j --config Release
+     ```
+   - Developer Command Prompt automatically sets up all compiler environment variables
+
+2. **Ensure no spaces in path:**
+   - Must be in `C:\Tools\whisper.cpp` or similar (NO spaces)
+   - Batch scripts will fail if path contains spaces
+   - If installed in `Program Files`, move it to `C:\Tools\`
+
+3. If still failing, reinstall [Visual C++ Build Tools](https://visualstudio.microsoft.com/downloads/):
+   - Download "Build Tools for Visual Studio 2022"
+   - Select "Desktop development with C++"
+   - Complete installation
+   - **Restart Developer Command Prompt**
+
+4. Alternative (if MSVC is problematic): Use MinGW instead:
+   ```cmd
+   choco install mingw
+   cmake -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+   cmake --build build -j
+   ```
+
 **Download model:**
 
+**macOS/Linux:**
 ```bash
-sh ./models/download-ggml-model.sh small.en
-# File: models/ggml-small.en.bin (~466 MB)
+sh ./models/download-ggml-model.sh base.en
 ```
+
+**Windows (PowerShell):**
+```powershell
+cd models
+.\download-ggml-model.cmd base.en
+```
+
+The `.cmd` script is the official Windows batch file included in the whisper.cpp repository.
 
 **Start server:**
 
 ```bash
-# Detect CPU count
-THREADS=$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)
-
 ./build/bin/whisper-server \
-  --model models/ggml-small.en.bin \
+  --model models/ggml-base.en.bin \
   --host 127.0.0.1 \
   --port 8001 \
-  --inference-path "/inference" \
-  --threads $THREADS \
-  --processors 1
+  --inference-path "/inference"
+```
+
+On Windows, you may need to provide `/Release` directory path and provided extension `.exe`, 
+
+```bash
+./build/bin/Release/whisper-server.exe \
+  --model models/ggml-base.en.bin \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --inference-path "/inference"
+
 ```
 
 **Test with cURL:**
@@ -238,7 +309,7 @@ THREADS=$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)
 curl http://127.0.0.1:8001/inference \
   -F file="@sample.wav" \
   -F response_format="json"
-# { "result": "transcribed text..." }
+# { "result": "Hello!" }
 ```
 
 ---
@@ -259,22 +330,36 @@ sudo apt install python3.11 python3.11-venv
 
 **Create venv and install:**
 
+**macOS/Linux:**
+
 ```bash
-# macOS/Linux
 python3.11 -m venv ~/Library/tools/venvs/piper
 source ~/Library/tools/venvs/piper/bin/activate
-
-# Windows
-python -m venv C:\Users\YourUsername\AppData\Local\piper-venv
-C:\Users\YourUsername\AppData\Local\piper-venv\Scripts\activate
 
 # Install Piper with HTTP support
 pip install --upgrade pip setuptools
 pip install ninja cmake scikit-build-core
-pip install 'piper-tts[http]'
+pip install piper-tts
+```
+
+**Windows (PowerShell):**
+
+```powershell
+mkdir C:\Tools\piper-venv -Force
+python -m venv C:\Tools\piper-venv
+C:\Tools\piper-venv\Scripts\Activate.ps1
+
+# Install Piper with HTTP support
+pip install piper-tts
+
+# Optionally, if piper-tts is missing depedencies
+pip install --upgrade pip setuptools
+pip install ninja cmake scikit-build-core
 ```
 
 **Download voice model:**
+
+**macOS/Linux:**
 
 ```bash
 mkdir -p ~/Library/models/piper
@@ -287,9 +372,17 @@ curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/
   -o en_US-amy-medium.onnx.json
 ```
 
-**Download samples**
-```bash
-make -j samples
+**Windows (PowerShell):**
+
+```powershell
+mkdir C:\Tools\piper-models -Force
+cd C:\Tools\piper-models
+
+$voiceUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx"
+$configUrl = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json"
+
+Invoke-WebRequest -Uri $voiceUrl -OutFile "en_US-amy-medium.onnx" -UseBasicParsing
+Invoke-WebRequest -Uri $configUrl -OutFile "en_US-amy-medium.onnx.json" -UseBasicParsing
 ```
 
 **Start server:**
@@ -302,7 +395,7 @@ python3 -m piper.http_server \
 
 # Windows (venv activated)
 python -m piper.http_server ^
-  --model C:\Users\YourUsername\AppData\Local\piper\en_US-amy-medium.onnx ^
+  --model C:\Tools\piper\piper-models\en_US-amy-medium.onnx ^
   --port 8002
 ```
 
@@ -353,7 +446,7 @@ All settings live in `appsettings.Development.json` under `ServiceConfiguration`
   "ServiceConfiguration": {
     "SttUrl": "http://127.0.0.1:8001/inference",
     "LlmUrl": "http://localhost:11434/v1/chat/completions",
-    "DefaultLlmModel": "gemma:2b",
+    "DefaultLlmModel": "mistral:instruct",
     "TtsMode": "http",
     "TtsUrl": "http://127.0.0.1:8002/synthesize"
   }
@@ -401,6 +494,30 @@ OpenAPI: `/openapi/v1.json` (Development environment only)
 ## Troubleshooting
 
 ### General Issues
+
+**PowerShell: "running scripts is disabled on this system"**
+
+If you get this error when trying to activate a Python venv or run scripts in PowerShell:
+
+```
+File ...\Scripts\Activate.ps1 cannot be loaded because running scripts is disabled
+```
+
+**Solution:** Allow scripts for this session only:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+```
+
+Then try activating the venv again:
+
+```powershell
+.\Scripts\Activate.ps1
+```
+
+This only affects the current PowerShell session and doesn't change system-wide policies.
+
+---
 
 **`ffmpeg: command not found`**
 

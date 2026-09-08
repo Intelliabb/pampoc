@@ -38,13 +38,13 @@ Everything else (the models, the STT server, the TTS binary) lives outside the r
 ┌──────────────────────────────────────────────┐
 │  PamPocApi (ASP.NET 9)                       │  http://localhost:5269
 │                                              │
-│  1. ffmpeg → 16 kHz mono 16-bit PCM WAV    │
-│  2. STT  ──────────────────────────────┐    │
-│  3. LLM  ──────────────────────────────┼─►  whisper.cpp server   :8001
-│  4. TTS  ──────────────────────────────┼─►  Ollama (OpenAI API)  :11434
-│                                        └─►  Piper HTTP server    :8002
+│  1. ffmpeg → 16 kHz mono 16-bit PCM WAV      │
+│  2. STT  ────────────────────────────────────┼─►  whisper.cpp server   :8001
+│  3. LLM  ────────────────────────────────────┼─►  Ollama (OpenAI API)  :11434
+│  4. TTS  ────────────────────────────────────┼─►  Piper HTTP server    :8002
 │                                              │
-│  Returns: { transcript, assistantText,      │
+│                                              │
+│  Returns: { transcript, assistantText,       │
 │             audioBase64, usage, timingsMs }  │
 └──────────────────────────────────────────────┘
 ```
@@ -67,6 +67,7 @@ All three services expose **HTTP REST endpoints**, making them interchangeable w
 
 - **macOS** (Apple Silicon or Intel x86_64) or **Windows** or **Linux**
 - [.NET 9 Runtime or SDK](https://dotnet.microsoft.com/download)
+- [Postman](https://www.postman.com/downloads/) (for testing API endpoints)
 - Microphone or test audio file (`sample.wav` included)
 - ~5 GB free disk space for models:
   - Whisper small.en ≈ 466 MB
@@ -75,7 +76,12 @@ All three services expose **HTTP REST endpoints**, making them interchangeable w
 
 ### macOS & Linux Prerequisites
 
+**macOS:**
 - [Homebrew](https://brew.sh)
+- Xcode Command Line Tools: `xcode-select --install`
+- Git, CMake, ffmpeg, Python 3.11
+
+**Linux:**
 - Git, CMake, ffmpeg, Python 3.11
 
 ### Windows Prerequisites
@@ -279,6 +285,11 @@ curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/
 
 curl -L https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json \
   -o en_US-amy-medium.onnx.json
+```
+
+**Download samples**
+```bash
+make -j samples
 ```
 
 **Start server:**
